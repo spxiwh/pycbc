@@ -27,6 +27,7 @@ utilities.
 """
 
 import logging
+import warnings
 from math import log, ceil, sqrt
 from pycbc.types import TimeSeries, FrequencySeries, zeros, Array, complex64
 from pycbc.types import complex_same_precision_as, real_same_precision_as
@@ -246,6 +247,203 @@ class MatchedFilterControl(object):
         else:
             raise ValueError("Invalid upsample method")            
 
+class MatchedFilterSkyMaxControl(object):
+    def __init__(self, low_frequency_cutoff, high_frequency_cutoff,
+                snr_threshold, tlen, delta_f, dtype):
+        """
+        Create a matched filter engine.
+
+        Parameters
+        ----------
+        low_frequency_cutoff : {None, float}, optional
+            The frequency to begin the filter calculation. If None, begin
+            at the first frequency after DC.
+        high_frequency_cutoff : {None, float}, optional
+            The frequency to stop the filter calculation. If None, continue
+            to the nyquist frequency.
+        snr_threshold : float
+            The minimum snr to return when filtering
+        """
+        self.tlen = tlen
+        self.delta_f = delta_f
+        self.dtype = dtype
+        self.snr_threshold = snr_threshold
+        self.flow = low_frequency_cutoff
+        self.fhigh = high_frequency_cutoff
+
+        self.matched_filter_and_cluster = \
+                                    self.full_matched_filter_and_cluster
+        self.snr_plus_mem = zeros(self.tlen, dtype=self.dtype)
+        self.corr_plus_mem = zeros(self.tlen, dtype=self.dtype)
+        self.snr_cross_mem = zeros(self.tlen, dtype=self.dtype)
+        self.corr_cross_mem = zeros(self.tlen, dtype=self.dtype)
+
+    def full_matched_filter_and_cluster(self, hplus, hcross, hplus_norm,
+                                        hcross_norm, psd, stilde, window):
+        """
+        Return the complex snr and normalization.
+
+        Calculated the matched filter, threshold, and cluster.
+
+        Parameters
+        ----------
+        h_quantities : Various
+            FILL ME IN
+        stilde : FrequencySeries
+            The strain data to be filtered.
+        window : int
+            The size of the cluster window in samples.
+
+        Returns
+        -------
+        snr : TimeSeries
+            A time series containing the complex snr.
+        norm : float
+            The normalization of the complex snr.
+        correlation: FrequencySeries
+            A frequency series containing the correlation vector.
+        idx : Array
+            List of indices of the triggers.
+        snrv : Array
+            The snr values at the trigger locations.
+        """
+        I_plus, Iplus_corr, Iplus_norm = matched_filter_core(hplus, stilde,
+                                          h_norm=hplus_norm,
+                                          low_frequency_cutoff=self.flow,
+                                          high_frequency_cutoff=self.fhigh,
+                                          out=self.snr_plus_mem,
+                                          corr_out=self.corr_plus_mem)
+        # FIXME: This is also an issue as it requires a MALLOC.
+        #        Maybe normalize hplus/hcross so norm is always 1?
+        I_plus = I_plus * Iplus_norm
+
+        I_cross, Icross_corr, Icross_norm = matched_filter_core(hcross,
+                                          stilde, h_norm=hcross_norm,
+                                          low_frequency_cutoff=self.flow,
+                                          high_frequency_cutoff=self.fhigh,
+                                          out=self.snr_cross_mem,
+                                          corr_out=self.corr_cross_mem)
+        I_cross = I_cross * Icross_norm
+
+        # The information on the complex side of this overlap is important
+        # we may want to use this in the future.
+        hplus_cross_corr = overlap_cplx(hplus, hcross, psd=psd,
+                                           low_frequency_cutoff=self.flow,
+                                           high_frequency_cutoff=self.fhigh,
+                                           normalized=False)
+        hplus_cross_corr = numpy.real(hplus_cross_corr)
+        hplus_cross_corr = hplus_cross_corr / (hcross_norm*hplus_norm)**0.5
+
+        # FIXME: This function only works for the CPU context
+        # FIXME: This function does not allow memory reusage
+        snr = compute_max_snr_over_sky_loc_stat(I_plus.data,I_cross.data,
+                                                hplus_cross_corr,
+                                                thresh=self.snr_threshold)
+        # FIXME: This should live further down
+        # Convert output to pycbc TimeSeries
+        delta_t = 1.0 / (self.tlen * stilde.delta_f)
+        snr=TimeSeries(snr, epoch=stilde._epoch, delta_t=delta_t, copy=False)
+
+        idx, snrv = events.threshold_real_numpy(snr[stilde.analyze], self.snr_threshold)
+
+        if len(idx) == 0:
+            return [], 0, 0, [], [], [], []
+        logging.info("%s points above threshold" % str(len(idx)))            
+ 
+
+        idx, snrv = events.cluster_reduce(idx, snrv, window)
+        logging.info("%s clustered points" % str(len(idx)))
+
+        return snr, Iplus_norm, Icross_norm, Iplus_corr, Icross_corr,\
+               idx, snrv
+
+
+def compute_max_snr_over_sky_loc_stat(hplus, hcross, hphccorr, thresh=0):
+    """
+    Compute the maximized over sky location statistic.
+
+    Parameters
+    -----------
+    hplus : TimeSeries
+        This is the IFFTed complex SNR time series of (h+, data). Note this
+        **must** not be normalized.
+    hcross : TimeSeries
+        This is the IFFTed complex SNR time series of (hx, data). Note this
+        **must** not be normalized.
+    hpsigmasq : float
+        The normalization factor (h+, h+).
+    hcsigmasq : float
+        The normalization factor (hx, hx).
+    hphccorr : float
+        The normalization factor Re[(h+, hx)].
+
+    Returns
+    --------
+    det_stat : TimeSeries
+        The SNR maximized over sky location
+    """
+    # NOTE: No optimization has been done here! This may need to be C-ified
+    # using scipy.weave, or we could try calling the lalinspiral function?
+
+    # If threshold is given we can limit the points at which to compute the
+    # full statistic
+    if thresh:
+        stat = hplus.real**2 + hplus.imag**2 + hcross.real**2 + hcross.imag**2
+        locs = numpy.where(stat > thresh**2)[0]
+        full_len = len(hplus)
+        hplus = hplus[locs]
+        hcross = hcross[locs]
+
+    # Start with constant values
+    delta = 2 * (hphccorr)
+    denom = 4. - delta * delta
+    if denom < 0:
+        print hphccorr
+        raise BrokenError
+  
+    assert(len(hplus) == len(hcross))
+
+    # Now the stuff where comp. cost may be a problem
+    hplus_magsq = numpy.real(hplus) * numpy.real(hplus) + \
+                       numpy.imag(hplus) * numpy.imag(hplus)
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        # FIXME: How to catch the very rare case of hplus -> 0 or hcross -> 0
+        ratio = hcross / hplus
+        # For now, ignore hcross = 0, this will set the det stat incorrectly
+        # to 0. hplus = 0 is caught, but resolved by incorrectly setting the
+        # det stat to 0. In both cases the statistic is not well defined.
+        ratio[numpy.isinf(ratio)] = 0
+    beta = 2 * numpy.real(ratio)
+    # FIXME: Replace with abs2 function in numpy ... except that doesn't exist!
+    # Using abs**2 will be slow as don't want to do sqrt operation
+    alpha = numpy.real(ratio) * numpy.real(ratio) + \
+                numpy.imag(ratio) * numpy.imag(ratio)
+    sqroot = alpha*alpha + alpha * (delta*delta - 2) + 1. + \
+                 beta * (beta * 1. - delta * (1. + alpha))
+    # Sometimes this can be less than 0 due to numeric imprecision, catch this.
+    if (sqroot < 0).any():
+        indices = numpy.arange(len(sqroot))[sqroot < 0] 
+        # This is a ratio so should not be *much* smaller than 0 due to
+        # numeric imprecision
+        if (sqroot[indices] < -0.0001).any():
+            err_msg = "Square root has become negative. Something wrong here!"
+            raise ValueError(err_msg)
+        sqroot[indices] = 0
+    sqroot = numpy.sqrt(sqroot)
+    brckt = 2*alpha + 2. - beta*delta + 2*sqroot
+    brckt = brckt / denom
+    det_stat_sq = hplus_magsq * brckt
+    det_stat = numpy.sqrt(det_stat_sq)
+
+    if thresh:
+        out = numpy.zeros(full_len, dtype=det_stat.dtype)
+        out[locs] = det_stat
+        det_stat = out
+
+    # Do I need to convert to a TimeSeries for return?
+    # Might be better to return this squared??
+    return det_stat
 
 def make_frequency_series(vec):
     """Return a frequency series of the input vector.
@@ -538,8 +736,8 @@ def smear(idx, factor):
         s += [idx + a]
     return numpy.unique(numpy.concatenate(s))
            
-def matched_filter(template, data, psd, low_frequency_cutoff=None,
-                  high_frequency_cutoff=None):
+def matched_filter(template, data, psd=None, low_frequency_cutoff=None,
+                  high_frequency_cutoff=None, sigmasq=None):
     """ Return the complex snr and normalization. 
     
     Return the complex snr, along with its associated normalization of the template,
@@ -565,7 +763,7 @@ def matched_filter(template, data, psd, low_frequency_cutoff=None,
     snr : TimeSeries
         A time series containing the complex snr. 
     """
-    snr, corr, norm = matched_filter_core(template, data, psd, low_frequency_cutoff, high_frequency_cutoff)
+    snr, corr, norm = matched_filter_core(template, data, psd=psd, low_frequency_cutoff=low_frequency_cutoff, high_frequency_cutoff=high_frequency_cutoff, h_norm=sigmasq)
     return snr * norm
     
 _snr = None 
@@ -714,5 +912,6 @@ def quadratic_interpolate_peak(left, middle, right):
 
 __all__ = ['match', 'matched_filter', 'sigmasq', 'sigma', 'get_cutoff_indices',
            'sigmasq_series', 'make_frequency_series', 'overlap', 'overlap_cplx',
-           'matched_filter_core', 'correlate', 'MatchedFilterControl']
+           'matched_filter_core', 'correlate', 'MatchedFilterControl',
+           'MatchedFilterSkyMaxControl', 'compute_max_snr_over_sky_loc_stat']
 

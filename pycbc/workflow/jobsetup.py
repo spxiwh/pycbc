@@ -99,7 +99,8 @@ def select_matchedfilter_class(curr_exe):
     """
     exe_to_class_map = {
         'lalapps_inspiral_ahope'  : LegacyInspiralExecutable,
-        'pycbc_inspiral'          : PyCBCInspiralExecutable
+        'pycbc_inspiral'          : PyCBCInspiralExecutable,
+        'pycbc_inspiral_skymax'   : PyCBCInspiralExecutable
     }
     try:
         return exe_to_class_map[curr_exe]

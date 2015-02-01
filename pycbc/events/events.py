@@ -39,6 +39,13 @@ def threshold(series, value):
     """Return list of values and indices values over threshold in series.
     """
 
+#FIXME: This should be under schemed, but I don't understand that yet!
+def threshold_real_numpy(series, value):
+    arr = series.data
+    locs = numpy.where(arr > value)[0]
+    vals = arr[locs]
+    return locs, vals
+
 @schemed("pycbc.events.threshold_")
 def threshold_and_cluster(series, threshold, window):
     """Return list of values and indices values over threshold in series.

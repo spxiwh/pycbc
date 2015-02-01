@@ -717,6 +717,35 @@ def get_waveform_filter(out, template=None, **kwargs):
         raise ValueError("Approximant %s not available" %
                             (input_params['approximant']))
 
+def get_two_pol_waveform_filter(outplus, outcross, template, **kwargs):
+    """Return a frequency domain waveform filter for the specified approximant
+    """
+    n = len(outplus)
+
+    # If we don't have an inclination column alpha3 might be used
+    if not hasattr(template, 'inclination')\
+                                         and not kwargs.has_key('inclination'):
+        if hasattr(template, 'alpha3'):
+            kwargs['inclination'] = template.alpha3
+
+    input_params = props(template, **kwargs)
+
+    if input_params['approximant'] in fd_approximants(_scheme.mgr.state):
+        wav_gen = fd_wav[type(_scheme.mgr.state)]
+        hp, hc = wav_gen[input_params['approximant']](**input_params)
+        hp.resize(n)
+        hc.resize(n)
+        hp.chirp_length = get_waveform_filter_length_in_time(**input_params)
+        hp.length_in_time = hp.chirp_length
+        hc.chirp_length = hp.chirp_length
+        hc.length_in_time = hp.length_in_time
+        return hp, hc
+
+    else:
+        raise ValueError("Approximant %s not available" %
+                            (input_params['approximant']))
+
+
 def waveform_norm_exists(approximant):
     if approximant in _filter_norms:
         return True
@@ -774,7 +803,8 @@ def get_waveform_filter_length_in_time(approximant,**kwargs):
 __all__ = ["get_td_waveform", "get_fd_waveform",
            "print_td_approximants", "print_fd_approximants",
            "td_approximants", "fd_approximants",
-           "get_waveform_filter", "filter_approximants",
+           "get_waveform_filter", "get_two_pol_waveform_filter",
+           "filter_approximants",
            "get_waveform_filter_norm", "get_waveform_end_frequency",
            "waveform_norm_exists", "get_template_amplitude_norm",
            "get_waveform_filter_length_in_time", "get_sgburst_waveform",

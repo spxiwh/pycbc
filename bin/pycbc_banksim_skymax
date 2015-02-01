@@ -28,7 +28,7 @@ start = time()
 elapsed_time = lambda: time()-start
 
 import sys
-from numpy import complex64, float32
+from numpy import complex64, float32, sqrt, argmax, real
 from argparse import ArgumentParser
 from glue.ligolw import utils as ligolw_utils
 from glue.ligolw import table, lsctables
@@ -42,6 +42,8 @@ from pycbc.waveform import get_td_waveform, get_fd_waveform, td_approximants, fd
 from pycbc import DYN_RANGE_FAC
 from pycbc.types import FrequencySeries, TimeSeries, zeros, real_same_precision_as, complex_same_precision_as
 from pycbc.filter import match, sigmasq, resample_to_delta_t
+from pycbc.filter import overlap_cplx, matched_filter
+from pycbc.filter import compute_max_snr_over_sky_loc_stat
 from pycbc.fft import fft
 from math import cos, sin, ceil, log
 import pycbc.psd, pycbc.scheme, pycbc.fft
@@ -115,45 +117,44 @@ def make_padded_frequency_series(vec, filter_N=None):
 
 def get_waveform(approximant, phase_order, amplitude_order, spin_order,
                  template_params, start_frequency, sample_rate, length,
-                 filter_rate):
+                 filter_rate, sky_max_template=False):
 
     if approximant in fd_approximants():
         delta_f = filter_rate / length
         if hasattr(template_params, 'latitude'):
             hp, hc = get_fd_waveform(template_params, approximant=approximant,
                                  phase_order=phase_order, delta_f=delta_f,
-                                 spin_order=spin_order,
+                                 spin_order=spin_order, f_ref = 40,
                                  f_lower=start_frequency,
                                  amplitude_order=amplitude_order)
-            hvec = generate_detector_strain(template_params, hp, hc)
+            if not sky_max_template:
+                hvec = generate_detector_strain(template_params, hp, hc)
         else:
             # FIXME: Hacked the alpha columns to hold sky location/orientation
             # params, as sngl_inspiral has no appropriate columns
             hp, hc = get_fd_waveform(template_params, approximant=approximant,
                                  phase_order=phase_order, delta_f=delta_f,
-                                 spin_order=spin_order,
+                                 spin_order=spin_order, f_ref = 40,
                                  f_lower=start_frequency,
                                  amplitude_order=amplitude_order,
                                  inclination=template_params.alpha3)
 
-            f_plus, f_cross = generate_fplus_fcross(template_params.alpha1,
+            if not sky_max_template:
+                f_plus, f_cross = generate_fplus_fcross(template_params.alpha1,
                                 template_params.alpha2, template_params.alpha4)
-            hvec = f_plus * hp + f_cross * hc
+                hvec = f_plus * hp + f_cross * hc
 
     elif approximant in td_approximants():
         if hasattr(template_params, 'latitude'):
-            hplus, hcross = get_td_waveform(template_params,
+            hp, hc = get_td_waveform(template_params,
                                         approximant=approximant,
                                         phase_order=phase_order,
                                         spin_order=spin_order,
                                         delta_t=1./sample_rate,
                                         f_lower=start_frequency,
                                         amplitude_order=amplitude_order)
-            hvec = generate_detector_strain(template_params, hplus, hcross)
         else:
-            # FIXME: Hacked the alpha columns to hold sky location/orientation
-            # params, as sngl_inspiral has no appropriate columns
-            hplus, hcross = get_td_waveform(template_params,
+            hp, hc = get_td_waveform(template_params,
                                         approximant=approximant,
                                         phase_order=phase_order,
                                         spin_order=spin_order,
@@ -161,16 +162,23 @@ def get_waveform(approximant, phase_order, amplitude_order, spin_order,
                                         f_lower=start_frequency,
                                         amplitude_order=amplitude_order,
                                         inclination=template_params.alpha3)
+        if not sky_max_template:
+            hvec = generate_detector_strain(template_params, hp, hc)
 
-            f_plus, f_cross = generate_fplus_fcross(template_params.alpha1,
-                                template_params.alpha2, template_params.alpha4)
-            hvec = f_plus * hplus + f_cross * hcross
+            if filter_rate != sample_rate:
+                delta_t = 1.0 / filter_rate
+                hvec = resample_to_delta_t(hvec, delta_t)
+        else:
+            if filter_rate != sample_rate:
+                delta_t = 1.0 / filter_rate
+                hp = resample_to_delta_t(hp, delta_t)
+                hc = resample_to_delta_t(hc, delta_t) 
 
-        if filter_rate != sample_rate:
-            delta_t = 1.0 / filter_rate
-            hvec = resample_to_delta_t(hvec, delta_t)
-
-    return make_padded_frequency_series(hvec, filter_N)
+    if not sky_max_template:
+        return make_padded_frequency_series(hvec, filter_N)
+    else:
+        return make_padded_frequency_series(hp, filter_N), \
+                   make_padded_frequency_series(hc, filter_N)
 
 def outside_mchirp_window(template, signal, w):
     template_mchirp, et = mass1_mass2_to_mchirp_eta(template.mass1,
@@ -309,7 +317,7 @@ with ctx:
         s_norm = sigmasq(stilde, psd=psd, 
                 low_frequency_cutoff=options.filter_low_frequency_cutoff,
                 high_frequency_cutoff=high_freq_cutoff)
-        stilde /= psd
+        #stilde /= psd
         signals.append((stilde, s_norm, [], signal_params,
                         high_freq_cutoff))
 
@@ -324,7 +332,7 @@ with ctx:
         index += 1
         if options.verbose:
           update_progress(float(index)/len(template_table))
-        h_norm = htilde = None
+        hplus = hcross = hp_norm = hc_norm = hpc_corr = None
         for stilde, s_norm, matches, signal_params, signal_high_freq_cutoff in signals:
             # Check if we need to look at this
             if stilde is None:
@@ -335,23 +343,44 @@ with ctx:
                 matches.append(0)
                 continue
 
-            # Generate htilde if we haven't already done so
-            if htilde is None:
-                htilde = get_waveform(options.template_approximant,
+            # Generate h+ and hx if we haven't already done so
+            if hplus is None:
+                hplus, hcross = get_waveform(options.template_approximant,
                                       options.template_phase_order,
                                       options.template_amplitude_order,
                                       options.template_spin_order,
                                       template_params,
                                       options.template_start_frequency,
                                       template_sample_rate,
-                                      filter_N, options.filter_sample_rate)
-            h_norm = sigmasq(htilde, psd=psd,
-                    low_frequency_cutoff=options.filter_low_frequency_cutoff,
-                    high_frequency_cutoff=signal_high_freq_cutoff)
+                                      filter_N, options.filter_sample_rate,
+                                      sky_max_template=True)
+                hp_norm = sigmasq(hplus, psd=psd,
+                      low_frequency_cutoff=options.filter_low_frequency_cutoff,
+                      high_frequency_cutoff=signal_high_freq_cutoff)
+                hc_norm = sigmasq(hcross, psd=psd,
+                      low_frequency_cutoff=options.filter_low_frequency_cutoff,
+                      high_frequency_cutoff=signal_high_freq_cutoff)
+                hpc_corr = overlap_cplx(hplus, hcross, psd=psd,
+                      low_frequency_cutoff=options.filter_low_frequency_cutoff,
+                      high_frequency_cutoff=signal_high_freq_cutoff,
+                      normalized=False)
+                hpc_corr = hpc_corr / (hp_norm * hc_norm)**0.5
+                hpc_corr_R = real(hpc_corr)
 
-            o, i = match(htilde, stilde, v1_norm=h_norm, v2_norm=s_norm,
-                    low_frequency_cutoff=options.filter_low_frequency_cutoff,
-                    high_frequency_cutoff=signal_high_freq_cutoff)
+            I_plus = matched_filter(hplus, stilde, psd=psd, sigmasq=hp_norm,
+                      low_frequency_cutoff=options.filter_low_frequency_cutoff,
+                      high_frequency_cutoff=signal_high_freq_cutoff)
+
+            I_cross = matched_filter(hcross, stilde, psd=psd, sigmasq=hc_norm,
+                      low_frequency_cutoff=options.filter_low_frequency_cutoff,
+                      high_frequency_cutoff=signal_high_freq_cutoff)
+
+            det_stat = compute_max_snr_over_sky_loc_stat(I_plus.data / sqrt(s_norm),
+                                    I_cross.data / sqrt(s_norm), hpc_corr_R)
+
+            i = argmax(det_stat)
+            o = det_stat[i]
+
             matches.append(o)
 
 if options.verbose:

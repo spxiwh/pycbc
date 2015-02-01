@@ -154,3 +154,79 @@ class FilterBank(object):
         htilde._sigmasq = {}
 
         return htilde
+
+class FilterBankSkyMax(FilterBank):
+    def __init__(self, filename, approximant, filter_length, delta_f, f_lower,
+                 dtype, out_plus=None, out_cross=None, **kwds):
+        super(FilterBankSkyMax, self).__init__(filename, approximant,
+                   filter_length, delta_f, f_lower, dtype, out=None, **kwds)
+        self.out_plus = out_plus
+        self.out_cross = out_cross
+
+    def __getitem__(self, index):
+        # Make new memory for templates if we aren't given output memory
+        if self.out_plus is None:
+            tempoutplus = zeros(self.filter_length, dtype=self.dtype)
+        else:
+            tempoutplus = self.out_plus
+        if self.out_cross is None:
+            tempoutcross = zeros(self.filter_length, dtype=self.dtype)
+        else:
+            tempoutcross = self.out_cross
+
+        # Get the end of the waveform if applicable (only for SPAtmplt atm)
+        f_end = pycbc.waveform.get_waveform_end_frequency(self.table[index],
+                              approximant=self.approximant, **self.extra_args)
+
+        if f_end is None or f_end >= (self.filter_length * self.delta_f):
+            f_end = (self.filter_length-1) * self.delta_f
+
+        # What does this do???
+        poke1 = tempoutplus.data
+        poke2 = tempoutcross.data
+
+        # Clear the storage memory
+        tempoutplus.clear()
+        tempoutcross.clear()
+
+        # Get the waveform filter
+        distance = 1.0 / DYN_RANGE_FAC
+        hplus, hcross = pycbc.waveform.get_two_pol_waveform_filter(
+            tempoutplus[0:self.filter_length],
+            tempoutcross[0:self.filter_length], self.table[index],
+            approximant=self.approximant, f_lower=self.f_lower,
+            f_final=f_end, delta_f=self.delta_f, delta_t=self.delta_t,
+            distance=distance, **self.extra_args)
+
+        # For time domain templates, record the total duration (which may
+        # include ringdown) and the duration up to merger since they will be
+        # erased by the type conversion below
+        length_in_time = None
+        chirp_length = None
+        if hasattr(hplus, 'length_in_time'):
+            length_in_time = hplus.length_in_time
+            self.table[index].ttotal = length_in_time
+        if hasattr(hplus, 'chirp_length'):
+            chirp_length = hplus.chirp_length
+            self.table[index].template_duration = chirp_length
+
+        hplus = hplus.astype(self.dtype)
+        hcross = hcross.astype(self.dtype)
+        hplus.f_lower = self.f_lower
+        hcross.f_lower = self.f_lower
+        hplus.end_frequency = f_end
+        hcross.end_frequency = f_end
+        hplus.end_idx = int(hplus.end_frequency / hplus.delta_f)
+        hcross.end_idx = int(hplus.end_frequency / hplus.delta_f)
+        hplus.params = self.table[index]
+        hcross.params = self.table[index]
+        hplus.approximant = self.approximant
+        hcross.approximant = self.approximant
+
+        # Add sigmasq as a method of this instance
+        hplus.sigmasq = types.MethodType(sigma_cached, hplus)
+        hplus._sigmasq = {}
+        hcross.sigmasq = types.MethodType(sigma_cached, hcross)
+        hcross._sigmasq = {}
+
+        return hplus, hcross
