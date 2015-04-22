@@ -211,46 +211,101 @@ class EventManager(object):
         i = indices_within_times(gpstime, inj_time - window, inj_time + window)
         self.events = self.events[i]
 
-    def maximize_over_bank(self, tcolumn, column, window):
+    def maximize_over_bank(self, tcolumn, column, window, legacy=False,
+                           pass_windows=[410], pass_columns=['time_index'],
+                           pass_methods=['absolute']):
         if len(self.events) == 0:
             return
+
+        assert(len(pass_windows) == len(pass_columns))
 
         self.events = numpy.sort(self.events, order=tcolumn)
         cvec = self.events[column]
         tvec = self.events[tcolumn]
 
         indices = []
-#        mint = tvec.min()
-#        maxt = tvec.max()
-#        edges = numpy.arange(mint, maxt, window)
+        if not legacy:
+            indices = fc_cluster_over_window_fast(tvec, cvec, window)
+        else:
+            # This algorithm is confusing, but it is what lalapps_inspiral
+            # does REMOVE ME!!!!!!!!!!!
+            gps = tvec.astype(numpy.float64) / self.opt.sample_rate + self.opt.gps_start_time
+            gps_sec  = numpy.floor(gps)
+            gps_nsec = (gps - gps_sec) * 1e9
 
-#        # Get the location of each time bin
-#        bins = numpy.searchsorted(tvec, edges)
-#        bins = numpy.append(bins, len(tvec))
-#        for i in range(len(bins)-1):
-#            kmin = bins[i]
-#            kmax = bins[i+1]
-#            if kmin == kmax:
-#                continue
-#            event_idx = numpy.argmax(cvec[kmin:kmax]) + kmin
-#            indices.append(event_idx)
+            wnsec = int(window * 1e9 / self.opt.sample_rate)
+            win = gps_nsec.astype(int) / wnsec
 
-        # This algorithm is confusing, but it is what lalapps_inspiral does
-        # REMOVE ME!!!!!!!!!!!
-        gps = tvec.astype(numpy.float64) / self.opt.sample_rate + self.opt.gps_start_time
-        gps_sec  = numpy.floor(gps)
-        gps_nsec = (gps - gps_sec) * 1e9
-
-        wnsec = int(window * 1e9 / self.opt.sample_rate)
-        win = gps_nsec.astype(int) / wnsec
-
-        indices.append(0)
-        for i in xrange(len(tvec)):
-            if gps_sec[i] == gps_sec[indices[-1]] and  win[i] == win[indices[-1]]:
+            indices.append(0)
+            for i in xrange(len(tvec)):
+                if gps_sec[i] == gps_sec[indices[-1]] and\
+                               win[i] == win[indices[-1]]:
                     if abs(cvec[i]) > abs(cvec[indices[-1]]):
                         indices[-1] = i
-            else:
-                indices.append(i)
+                else:
+                    indices.append(i)
+
+        if len(pass_windows):
+            assert(len(pass_windows) == len(pass_methods))
+            pass_window_vals = []
+            tid = self.events['template_id']
+            for pass_column in pass_columns:
+                try:
+                    curr_vals = self.events[pass_column]
+                    pass_window_vals.append(curr_vals)
+                except ValueError:
+                    try:
+                        # Maybe this is a value in the template table?
+                        curr_vals = numpy.array([\
+                                          getattr(t['tmplt'],pass_column) for \
+                                                    t in self.template_params])
+                        pass_window_vals.append(curr_vals[tid])
+                    except:
+                        print self.template_params[0].keys()
+                        raise
+
+            for method in pass_methods:
+                assert(method in ['relative','absolute'])
+
+            # Are the indices already sorted?
+            indices = numpy.sort(indices)
+            # Initialize
+            indices_widened = []
+            index_next_idx = 0
+            index_next = indices[index_next_idx]
+            len_indices = len(indices)
+            # Loop over *all* triggers
+            for i in xrange(len(tvec)):
+                # Is this one of the maxima? Always keep those.
+                if i == index_next:
+                    indices_widened.append(i)
+                    if index_next_idx == (len_indices-1):
+                        index_next = None
+                        index_next_idx = index_next_idx + 1
+                    else:
+                        index_next_idx = index_next_idx + 1
+                        index_next = indices[index_next_idx]
+                    continue
+                test_indices = []
+                if index_next is not None:
+                    test_indices.append(index_next)
+                if not index_next_idx == 0:
+                    test_indices.append(indices[index_next_idx-1])
+                for test_index in test_indices:
+                    if abs(tvec[i] - tvec[test_index]) > window:
+                        continue
+                    for pass_window, vals, pass_method in \
+                             zip(pass_windows, pass_window_vals, pass_methods):
+                        if pass_method == 'relative':
+                            norm_fac = vals[i]
+                        else:
+                            norm_fac = 1.
+                        if abs(vals[i] - vals[test_index]) / norm_fac >\
+                                                                   pass_window:
+                            continue
+                        indices_widened.append(i)
+                        break
+            indices = numpy.unique(indices_widened)
 
         self.events = numpy.take(self.events, indices)
 
