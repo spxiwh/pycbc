@@ -87,6 +87,17 @@ def findchirp_cluster_over_window(times, values, window_length):
                  extra_compile_args=['-march=native -O3 -w'])
     return indices[0:k[0]+1]
 
+def cohptf_cluster_over_window(times, values, window_length):
+    indices_forward = findchirp_cluster_over_window(times, values,
+                                                    window_length)
+    # Also check with reversed array
+    tmp_vals = numpy.fliplr([values])[0]
+    tmp_times = - numpy.fliplr([times])[0]
+    indices_backward = findchirp_cluster_over_window(tmp_times, tmp_vals,
+                                                    window_length)
+    indices_backward = (len(tmp_vals)-1) - indices_backward
+    return numpy.intersect1d(indices_forward,indices_backward)
+
 def cluster_reduce(idx, snr, window_size):
     """ Reduce the events by clustering over a window
 
@@ -215,7 +226,8 @@ class EventManager(object):
         keep = numpy.concatenate(keep)
         self.events = e[keep]
 
-    def maximize_over_bank(self, tcolumn, column, window):
+    def maximize_over_bank(self, tcolumn, column, window,
+                           do_snr_and_time_cluster_expand=True):
         if len(self.events) == 0:
             return
 
@@ -223,38 +235,50 @@ class EventManager(object):
         cvec = self.events[column]
         tvec = self.events[tcolumn]
 
-        indices = []
-#        mint = tvec.min()
-#        maxt = tvec.max()
-#        edges = numpy.arange(mint, maxt, window)
+        indices = cohptf_cluster_over_window(tvec, cvec, window)
 
-#        # Get the location of each time bin
-#        bins = numpy.searchsorted(tvec, edges)
-#        bins = numpy.append(bins, len(tvec))
-#        for i in range(len(bins)-1):
-#            kmin = bins[i]
-#            kmax = bins[i+1]
-#            if kmin == kmax:
-#                continue
-#            event_idx = numpy.argmax(cvec[kmin:kmax]) + kmin
-#            indices.append(event_idx)
+        # Here we can have a variety of methods for also keeping triggers
+        # around the central point.
 
-        # This algorithm is confusing, but it is what lalapps_inspiral does
-        # REMOVE ME!!!!!!!!!!!
-        gps = tvec.astype(numpy.float64) / self.opt.sample_rate + self.opt.gps_start_time
-        gps_sec  = numpy.floor(gps)
-        gps_nsec = (gps - gps_sec) * 1e9
-
-        wnsec = int(window * 1e9 / self.opt.sample_rate)
-        win = gps_nsec.astype(int) / wnsec
-
-        indices.append(0)
-        for i in xrange(len(tvec)):
-            if gps_sec[i] == gps_sec[indices[-1]] and  win[i] == win[indices[-1]]:
-                    if abs(cvec[i]) > abs(cvec[indices[-1]]):
-                        indices[-1] = i
-            else:
-                indices.append(i)
+        # This option accepts all triggers within 0.1s of *and* 80% SNR of a
+        # peak. Those values are currently hardcoded
+        if do_snr_and_time_cluster_expand:
+            # FIXME: Sample rate of 4096 hardcoded here
+            time_window = int(0.1 * 4096)
+            snr_window_rel = 0.8
+            # Initialize
+            indices_widened = []
+            index_next_idx = 0
+            index_next = indices[0]
+            len_indices = len(indices)
+            # Loop over *all* triggers
+            for i in xrange(len(tvec)):
+                # Is this one of the maxima? Always keep those.
+                if i == index_next:
+                    indices_widened.append(i)
+                    if index_next_idx == (len_indices-1):
+                        index_next = None
+                        index_next_idx = index_next_idx + 1
+                    else:
+                        index_next_idx = index_next_idx + 1
+                        index_next = indices[index_next_idx]
+                    continue
+                test_indices = []
+                # Test this trigger against the previous and next maxima
+                # (if trigger is at one end, only test against one point).
+                if index_next is not None:
+                    test_indices.append(index_next)
+                if not index_next_idx == 0:
+                    test_indices.append(indices[index_next_idx-1])
+                for test_index in test_indices:
+                    if abs(tvec[i] - tvec[test_index]) > time_window:
+                        continue
+                    if abs((cvec[i] - cvec[test_index]) / cvec[test_index])\
+                                                                         < 0.8:
+                        continue
+                    indices_widened.append(i)
+                    break
+            indices = numpy.unique(indices_widened)
 
         self.events = numpy.take(self.events, indices)
 
@@ -964,4 +988,5 @@ class EventManagerMultiDet(EventManager):
 __all__ = ['threshold_and_cluster', 'newsnr', 'effsnr',
            'findchirp_cluster_over_window',
            'threshold', 'cluster_reduce',
+           'cohptf_cluster_over_window',
            'EventManager', 'EventManagerMultiDet']
