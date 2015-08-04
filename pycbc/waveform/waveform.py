@@ -338,6 +338,8 @@ def get_td_waveform(template=None, **kwargs):
         else:
             raise ValueError("Please provide " + str(arg) )
 
+    # FIXME: Add here a test for NR waveforms and pick up here
+
     return wav_gen[input_params['approximant']](**input_params)
 
 def get_fd_waveform(template=None, **kwargs):

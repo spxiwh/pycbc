@@ -1,29 +1,30 @@
 # Add copyright stuff
 
+import os
 import h5py
 from scipy.interpolate import UnivariateSpline
 
+import numpy
+
 import lal
 
-from pycbc.waveform import seobnrrom_length_in_time
+from .waveform import seobnrrom_length_in_time
 
 def get_data_from_h5_file(filename, time_series):
     """
     This one is a bit of a Ronseal.
     """
-    fp = h5py.file(filename, 'r')
+    fp = h5py.File(filename, 'r')
     deg = fp['deg'][()]
     knots = fp['knots'][:]
-    coeffs = fp['coeffs'][:]
-    indices = fp['indices'][:]
     data = fp['data'][:]
     # Check time_series is valid
     assert(knots[0] < time_series[0])
     assert(knots[-1] > time_series[-1])
     fp.close()
-    spline = UnivariateSpline(self.knots, self._data, k=self._deg, s=0)
-    spline(time_series, dx=0)
-    return spline
+    spline = UnivariateSpline(knots, data, k=deg, s=0)
+    out = spline(time_series, 0)
+    return out
 
 def get_hplus_hcross_from_directory(directory, template_params):
     """
@@ -31,17 +32,17 @@ def get_hplus_hcross_from_directory(directory, template_params):
     f_lower.
     """
     total_mass = template_params['mtotal']
-    flower = template_params['flower']
+    flower = template_params['f_lower']
     delta_t = template_params['delta_t']
     theta = template_params['inclination'] # Is it???
     phi = template_params['coa_phase'] # Is it???
 
     # First figure out time series that is needed.
     # Demand that 22 mode that is present and use that
-    fp = h5py.file(os.path.join(directory)+'Amph22.h5', 'r')
+    fp = h5py.File(os.path.join(directory)+'Amph22.h5', 'r')
     knots = fp['knots'][:]
     time_start_M = knots[0]
-    time_start_s = time_start * lal.MTSUN_SI * total_mass
+    time_start_s = time_start_M * lal.MTSUN_SI * total_mass
     time_end_M = knots[-1]
     time_end_s = time_end_M * lal.MTSUN_SI * total_mass
 
@@ -60,6 +61,7 @@ def get_hplus_hcross_from_directory(directory, template_params):
 
     # Generate time array
     time_series = numpy.arange(time_start_s, time_end_s, delta_t)
+    time_series_M = time_series / (lal.MTSUN_SI * total_mass)
     hp = numpy.zeros(len(time_series), dtype=float)
     hc = numpy.zeros(len(time_series), dtype=float)
 
@@ -70,8 +72,8 @@ def get_hplus_hcross_from_directory(directory, template_params):
             phase_file_name = os.path.join(directory, "Phaseh%d%d.h5" %(l,m))
             if not os.path.isfile(amp_file_name):
                 continue
-            curr_amp = get_data_from_h5_file(amp_file_name, time_series)
-            curr_phase = get_data_from_h5_file(phase_file_name, time_series)
+            curr_amp = get_data_from_h5_file(amp_file_name, time_series_M)
+            curr_phase = get_data_from_h5_file(phase_file_name, time_series_M)
             curr_h_real = curr_amp * numpy.cos(curr_phase)
             curr_h_imag = curr_amp * numpy.sin(curr_phase)
             curr_ylm = lal.SpinWeightedSphericalHarmonic(theta, phi, -2, l, m)
