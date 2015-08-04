@@ -37,6 +37,8 @@ class mycontenthandler(LIGOLWContentHandler):
     pass
 lsctables.use_in(mycontenthandler)
 
+import lal
+
 from pycbc.pnutils import mass1_mass2_to_mchirp_eta, f_SchwarzISCO
 from pycbc.waveform import get_td_waveform, get_fd_waveform, td_approximants, fd_approximants
 from pycbc import DYN_RANGE_FAC
@@ -141,6 +143,8 @@ def get_waveform(approximant, phase_order, amplitude_order, spin_order,
             hvec = f_plus * hp + f_cross * hc
 
     elif approximant in td_approximants():
+        if approximant == 'SpinTaylorT2':
+            template_params.f_final = 6**-1.5 / (lal.PI * (template_params.mass1 + template_params.mass2) * lal.MTSUN_SI)
         if hasattr(template_params, 'latitude'):
             hplus, hcross = get_td_waveform(template_params,
                                         approximant=approximant,
