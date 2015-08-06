@@ -7,6 +7,7 @@ from scipy.interpolate import UnivariateSpline
 import numpy
 
 import lal
+import lalsimulation
 
 from .waveform import seobnrrom_length_in_time
 
@@ -26,6 +27,19 @@ def get_data_from_h5_file(filename, time_series):
     out = spline(time_series, 0)
     return out
 
+def inspiral_chirp_time(**kwds):
+    mass1 = kwds['mass1']
+    mass2 = kwds['mass2']
+    spin1z = kwds['spin1z']
+    spin2z = kwds['spin2z']
+    fmin = kwds['f_lower']
+
+    time_length = lalsimulation.SimInspiralChirpTimeBound(fmin, mass1*lal.MSUN_SI, mass2*lal.MSUN_SI, spin1z, spin2z)
+
+    return time_length
+
+
+
 def get_hplus_hcross_from_directory(directory, template_params):
     """
     Generate hplus, hcross from a directory, for a given total mass and
@@ -43,11 +57,16 @@ def get_hplus_hcross_from_directory(directory, template_params):
     knots = fp['knots'][:]
     time_start_M = knots[0]
     time_start_s = time_start_M * lal.MTSUN_SI * total_mass
+    print "hybrid start time in M:", time_start_M
+    print "hybrdid start time in s:", time_start_s
     time_end_M = knots[-1]
     time_end_s = time_end_M * lal.MTSUN_SI * total_mass
 
     # Restrict start time if needed
-    flow_start_time = seobnrrom_length_in_time(**template_params)
+    flow_start_time = inspiral_chirp_time(**template_params)
+    #flow_start_time = seobnrrom_length_in_time(**template_params)
+    print -flow_start_time
+    print time_start_s
     # t=0 means merger so invert
     flow_start_time = -flow_start_time
     if flow_start_time > time_start_s:
@@ -81,4 +100,4 @@ def get_hplus_hcross_from_directory(directory, template_params):
             # FIXME: No idea whether these should be minus or plus, guessing
             #        minus for now. Only affects some polarization phase
             hc += - curr_h_real * curr_ylm.imag - curr_h_imag * curr_ylm.real 
-    return hp, hc
+    return hp, hc, time_series
