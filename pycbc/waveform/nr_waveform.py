@@ -42,9 +42,9 @@ def get_hplus_hcross_from_directory(directory, template_params):
     fp = h5py.File(os.path.join(directory)+'Amph22.h5', 'r')
     knots = fp['knots'][:]
     time_start_M = knots[0]
-    time_start_s = time_start_M * lal.MTSUN_SI / total_mass
+    time_start_s = time_start_M * lal.MTSUN_SI * total_mass
     time_end_M = knots[-1]
-    time_end_s = time_end_M * lal.MTSUN_SI / total_mass
+    time_end_s = time_end_M * lal.MTSUN_SI * total_mass
 
     # Restrict start time if needed
     flow_start_time = seobnrrom_length_in_time(**template_params)
@@ -52,7 +52,7 @@ def get_hplus_hcross_from_directory(directory, template_params):
     flow_start_time = -flow_start_time
     if flow_start_time > time_start_s:
         time_start_s = flow_start_time
-        time_start_M = time_start_s * total_mass / (lal.MTSUN_SI)
+        time_start_M = time_start_s / (lal.MTSUN_SI * total_mass)
     else:
         # FIXME: Is this the right behaviour
         err_msg = "WAVEFORM IS NOT LONG ENOUGH. %e %e" \
@@ -61,7 +61,7 @@ def get_hplus_hcross_from_directory(directory, template_params):
 
     # Generate time array
     time_series = numpy.arange(time_start_s, time_end_s, delta_t)
-    time_series_M = time_series * total_mass / (lal.MTSUN_SI)
+    time_series_M = time_series / (lal.MTSUN_SI * total_mass)
     hp = numpy.zeros(len(time_series), dtype=float)
     hc = numpy.zeros(len(time_series), dtype=float)
 
