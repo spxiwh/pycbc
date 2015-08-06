@@ -19,8 +19,8 @@ def get_data_from_h5_file(filename, time_series):
     knots = fp['knots'][:]
     data = fp['data'][:]
     # Check time_series is valid
-    assert(knots[0] < time_series[0])
-    assert(knots[-1] > time_series[-1])
+    assert(knots[0] <= time_series[0])
+    assert(knots[-1] >= time_series[-1])
     fp.close()
     spline = UnivariateSpline(knots, data, k=deg, s=0)
     out = spline(time_series, 0)
