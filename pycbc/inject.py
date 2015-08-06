@@ -34,6 +34,7 @@ from glue.ligolw import utils as ligolw_utils
 from glue.ligolw import ligolw, table, lsctables
 from pycbc.types import float64, float32, TimeSeries
 from pycbc.detector import Detector
+from pycbc.waveform import nr_waveform
 
 injection_func_map = {
     np.dtype(float32): sim.SimAddInjectionREAL4TimeSeries,
@@ -149,6 +150,10 @@ class InjectionSet(object):
             else:
                 f_l = f_lower
 
+            if inj.approximant=='NR_hdf5':
+                hdf_directory = inj.numrel_data
+                hp, hc = nr_waveform.get_hplus_hcross_from_directory(\
+                                                            hdf_directory, inj)
             if inj.numrel_data != None and inj.numrel_data != "":
                 # performing NR waveform injection
                 # reading Hp and Hc from the frame files

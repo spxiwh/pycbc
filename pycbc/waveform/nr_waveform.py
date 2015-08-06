@@ -11,6 +11,8 @@ import lalsimulation
 
 from .waveform import seobnrrom_length_in_time
 
+from pycbc.types import TimeSeries
+
 def get_data_from_h5_file(filename, time_series):
     """
     This one is a bit of a Ronseal.
@@ -45,11 +47,26 @@ def get_hplus_hcross_from_directory(directory, template_params):
     Generate hplus, hcross from a directory, for a given total mass and
     f_lower.
     """
+    def get_param(value):
+        try:
+            return getattr(template_params, value)
+        except:
+            return template_params[value]
+
+    mass1 = template_params['mass1']
+    mass2 = template_params['mass2']
     total_mass = template_params['mtotal']
     flower = template_params['f_lower']
     delta_t = template_params['delta_t']
     theta = template_params['inclination'] # Is it???
     phi = template_params['coa_phase'] # Is it???
+    end_time = template_params['end_time']
+    distance = template_params['distance']
+
+    # Sanity checking
+    # FIXME: Add more checks!
+    # FIXME: Add check that mass ratio is consistent
+    # FIXME: Add check that spins are consistent
 
     # First figure out time series that is needed.
     # Demand that 22 mode that is present and use that
@@ -100,4 +117,15 @@ def get_hplus_hcross_from_directory(directory, template_params):
             # FIXME: No idea whether these should be minus or plus, guessing
             #        minus for now. Only affects some polarization phase
             hc += - curr_h_real * curr_ylm.imag - curr_h_imag * curr_ylm.real 
-    return hp, hc, time_series
+
+    # Scale by distance
+    # FIXME: Is this right, what is the NR waveform scaling?? Probably need
+    #        to conver to physical units anyway! (distance is in Mpc)
+    hp /= distance
+    hc /= distance
+
+    # Time start s is negative and is time from peak to start
+    hp = TimeSeries(hp, delta_t=delta_t, epoch=end_time+time_start_s)
+    hc = TimeSeries(hc, delta_t=delta_t, epoch=end_time+time_start_s)
+
+    return hp, hc
