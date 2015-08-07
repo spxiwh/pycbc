@@ -63,11 +63,12 @@ parser = argparse.ArgumentParser(description=_desc)
 parser.add_argument('--version', action='version',
                     version=pycbc.version.git_verbose_msg)
 parser.add_argument("-V", "--verbose", action="store_true",
-                  help="print extra debugging information", default=False )
+                    help="print extra debugging information", default=False )
 parser.add_argument("-o", "--output-file", action="store", type=str,
-                  required=True, help="Output file name")
-parser.add_argument("-i", "--input-files", nargs= '*', dest='inputs', action="store", type=str,
-                          required=True, help="Path to HDF5 input files")
+                    required=True, help="Output file name")
+parser.add_argument("-i", "--input-files", nargs= '*', dest='inputs',
+                    action="store", type=str, required=True,
+                    help="Path to HDF5 input files")
 # FIXME: Examples, delete later
 #parser.add_argument("-m", "--min-match", action="store", type=float,
 #                    default=None, help=
