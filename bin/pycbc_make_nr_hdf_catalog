@@ -22,6 +22,8 @@ Patricia to write some description of the code here, also appears in help text.
 
 import sys, argparse
 
+import h5py 
+
 from glue.ligolw import ligolw
 from glue.ligolw import table
 from glue.ligolw import lsctables
@@ -64,6 +66,8 @@ parser.add_argument("-V", "--verbose", action="store_true",
                   help="print extra debugging information", default=False )
 parser.add_argument("-o", "--output-file", action="store", type=str,
                   required=True, help="Output file name")
+parser.add_argument("-i", "--input-files", nargs= '*', dest='inputs', action="store", type=str,
+                          required=True, help="Path to HDF5 input files")
 # FIXME: Examples, delete later
 #parser.add_argument("-m", "--min-match", action="store", type=float,
 #                    default=None, help=
@@ -94,7 +98,8 @@ sim_table = lsctables.New(lsctables.SimInspiralTable)
 
 # Some input here to figure out how many injections we have
 # FIXME: Hardcoded
-inj_list = ['/path/to/hdf/file1.hdf', '/path/to/hdf/file2.hdf']
+inj_list = args.inputs
+print inj_list
 
 for count, inj in enumerate(inj_list):
     curr_sim = lsctables.SimInspiral()
@@ -106,13 +111,16 @@ for count, inj in enumerate(inj_list):
                                            %(count))
     curr_sim.numrel_data = inj
     # FIXME: Patricia fix!
-    curr_sim.eta = 0.25
-    curr_sim.spin1x = 0.2
-    curr_sim.spin1y = 0.2
-    curr_sim.spin1z = 0.2
-    curr_sim.spin2x = 0.2
-    curr_sim.spin2y = 0.2
-    curr_sim.spin2z = 0.2
+    print inj
+    f = h5py.File(inj, 'r')    #Is this the correct index?
+    curr_sim.eta = f.attrs['eta']
+    curr_sim.spin1x = f.attrs['spin1x']
+    curr_sim.spin1y = f.attrs['spin1y']
+    curr_sim.spin1z = f.attrs['spin1z']
+    curr_sim.spin2x = f.attrs['spin2x']
+    curr_sim.spin2y = f.attrs['spin2y']
+    curr_sim.spin2z = f.attrs['spin2z']
+    f.close()
 
     # FIXME: Do we need these?
     curr_sim.f_lower = 0.
