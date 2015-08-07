@@ -22,7 +22,8 @@ Patricia to write some description of the code here, also appears in help text.
 
 import sys, argparse
 
-import h5py 
+import h5py
+import lal
 
 from glue.ligolw import ligolw
 from glue.ligolw import table
@@ -100,7 +101,6 @@ sim_table = lsctables.New(lsctables.SimInspiralTable)
 # Some input here to figure out how many injections we have
 # FIXME: Hardcoded
 inj_list = args.inputs
-print inj_list
 
 for count, inj in enumerate(inj_list):
     curr_sim = lsctables.SimInspiral()
@@ -112,7 +112,6 @@ for count, inj in enumerate(inj_list):
                                            %(count))
     curr_sim.numrel_data = inj
     # FIXME: Patricia fix!
-    print inj
     f = h5py.File(inj, 'r')    #Is this the correct index?
     curr_sim.eta = f.attrs['eta']
     curr_sim.spin1x = f.attrs['spin1x']
@@ -121,10 +120,11 @@ for count, inj in enumerate(inj_list):
     curr_sim.spin2x = f.attrs['spin2x']
     curr_sim.spin2y = f.attrs['spin2y']
     curr_sim.spin2z = f.attrs['spin2z']
-    f.close()
 
     # FIXME: Do we need these?
-    curr_sim.f_lower = 0.
+    curr_sim.f_lower = f.attrs['f_lower_at_1MSUN'] * lal.TWOPI * lal.MTSUN_SI
+    f.close()
+    #print curr_sim.f_lower
     curr_sim.numrel_mode_max = 0
     curr_sim.numrel_mode_min = 0
     
