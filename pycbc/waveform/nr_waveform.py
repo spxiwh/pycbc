@@ -13,18 +13,16 @@ from .waveform import seobnrrom_length_in_time
 
 from pycbc.types import TimeSeries
 
-def get_data_from_h5_file(filename, time_series):
+def get_data_from_h5_file(filepointer, time_series, key_name):
     """
     This one is a bit of a Ronseal.
     """
-    fp = h5py.File(filename, 'r')
-    deg = fp['deg'][()]
-    knots = fp['knots'][:]
-    data = fp['data'][:]
+    deg = filepointer[key_name]['deg'][()]
+    knots = filepointer[key_name]['knots'][:]
+    data = filepointer[key_name]['data'][:]
     # Check time_series is valid
     assert(knots[0] <= time_series[0])
     assert(knots[-1] >= time_series[-1])
-    fp.close()
     spline = UnivariateSpline(knots, data, k=deg, s=0)
     out = spline(time_series, 0)
     return out
@@ -42,9 +40,9 @@ def inspiral_chirp_time(**kwds):
 
 
 
-def get_hplus_hcross_from_directory(directory, template_params):
+def get_hplus_hcross_from_directory(hd5_file_name, template_params):
     """
-    Generate hplus, hcross from a directory, for a given total mass and
+    Generate hplus, hcross from a NR hd5 file, for a given total mass and
     f_lower.
     """
     def get_param(value):
@@ -70,8 +68,8 @@ def get_hplus_hcross_from_directory(directory, template_params):
 
     # First figure out time series that is needed.
     # Demand that 22 mode that is present and use that
-    fp = h5py.File(os.path.join(directory)+'Amph22.h5', 'r')
-    knots = fp['knots'][:]
+    fp = h5py.File(hd5_file_name, 'r')
+    knots = fp['amp22']['knots'][:]
     time_start_M = knots[0]
     time_start_s = time_start_M * lal.MTSUN_SI * total_mass
     print "hybrid start time in M:", time_start_M
@@ -104,12 +102,15 @@ def get_hplus_hcross_from_directory(directory, template_params):
     # Generate the waveform
     for l in (2,3,4,5,6,7,8):
         for m in range(-l,l+1):
-            amp_file_name = os.path.join(directory, "Amph%d%d.h5" %(l,m))
-            phase_file_name = os.path.join(directory, "Phaseh%d%d.h5" %(l,m))
-            if not os.path.isfile(amp_file_name):
+            amp_key = 'amp%d%d' %(l,m)
+            phase_key = 'phase%d%d' %(l,m)
+            if amp_key not in fp.keys() or phase_key not in fp.keys():
                 continue
-            curr_amp = get_data_from_h5_file(amp_file_name, time_series_M)
-            curr_phase = get_data_from_h5_file(phase_file_name, time_series_M)
+            # FIXME: Debugging
+            print "Using %d,%d mode" %(l,m)
+
+            curr_amp = get_data_from_h5_file(fp, time_series_M, amp_key)
+            curr_phase = get_data_from_h5_file(fp, time_series_M, phase_key)
             curr_h_real = curr_amp * numpy.cos(curr_phase)
             curr_h_imag = curr_amp * numpy.sin(curr_phase)
             curr_ylm = lal.SpinWeightedSphericalHarmonic(theta, phi, -2, l, m)
@@ -127,5 +128,7 @@ def get_hplus_hcross_from_directory(directory, template_params):
     # Time start s is negative and is time from peak to start
     hp = TimeSeries(hp, delta_t=delta_t, epoch=end_time+time_start_s)
     hc = TimeSeries(hc, delta_t=delta_t, epoch=end_time+time_start_s)
+
+    fp.close()
 
     return hp, hc
