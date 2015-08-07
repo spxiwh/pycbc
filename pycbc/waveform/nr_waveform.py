@@ -27,39 +27,33 @@ def get_data_from_h5_file(filepointer, time_series, key_name):
     out = spline(time_series, 0)
     return out
 
-def inspiral_chirp_time(**kwds):
-    mass1 = kwds['mass1']
-    mass2 = kwds['mass2']
-    spin1z = kwds['spin1z']
-    spin2z = kwds['spin2z']
-    fmin = kwds['f_lower']
-
-    time_length = lalsimulation.SimInspiralChirpTimeBound(fmin, mass1*lal.MSUN_SI, mass2*lal.MSUN_SI, spin1z, spin2z)
-
-    return time_length
-
-
-
-def get_hplus_hcross_from_directory(hd5_file_name, template_params):
+def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     """
     Generate hplus, hcross from a NR hd5 file, for a given total mass and
     f_lower.
     """
     def get_param(value):
         try:
-            return getattr(template_params, value)
+            if value == 'end_time':
+                # FIXME: Imprecise!
+                return float(template_params.get_end())
+            else:
+                return getattr(template_params, value)
         except:
+            raise
             return template_params[value]
 
-    mass1 = template_params['mass1']
-    mass2 = template_params['mass2']
-    total_mass = template_params['mtotal']
-    flower = template_params['f_lower']
-    delta_t = template_params['delta_t']
-    theta = template_params['inclination'] # Is it???
-    phi = template_params['coa_phase'] # Is it???
-    end_time = template_params['end_time']
-    distance = template_params['distance']
+    mass1 = get_param('mass1')
+    mass2 = get_param('mass2')
+    total_mass = mass1 + mass2
+    spin1z = get_param('spin2z')
+    spin2z = get_param('spin2z')
+    flower = get_param('f_lower')
+    theta = get_param('inclination') # Is it???
+    phi = get_param('coa_phase') # Is it???
+    end_time = get_param('end_time')
+    print end_time
+    distance = get_param('distance')
 
     # Sanity checking
     # FIXME: Add more checks!
@@ -69,7 +63,7 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params):
     # First figure out time series that is needed.
     # Demand that 22 mode that is present and use that
     fp = h5py.File(hd5_file_name, 'r')
-    knots = fp['amp22']['knots'][:]
+    knots = fp['amp_l2_m2']['knots'][:]
     time_start_M = knots[0]
     time_start_s = time_start_M * lal.MTSUN_SI * total_mass
     print "hybrid start time in M:", time_start_M
@@ -78,7 +72,8 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params):
     time_end_s = time_end_M * lal.MTSUN_SI * total_mass
 
     # Restrict start time if needed
-    flow_start_time = inspiral_chirp_time(**template_params)
+    flow_start_time = lalsimulation.SimInspiralChirpTimeBound(flower,
+                          mass1*lal.MSUN_SI, mass2*lal.MSUN_SI, spin1z, spin2z)
     #flow_start_time = seobnrrom_length_in_time(**template_params)
     print -flow_start_time
     print time_start_s
@@ -102,8 +97,8 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params):
     # Generate the waveform
     for l in (2,3,4,5,6,7,8):
         for m in range(-l,l+1):
-            amp_key = 'amp%d%d' %(l,m)
-            phase_key = 'phase%d%d' %(l,m)
+            amp_key = 'amp_l%d_m%d' %(l,m)
+            phase_key = 'phase_l%d_m%d' %(l,m)
             if amp_key not in fp.keys() or phase_key not in fp.keys():
                 continue
             # FIXME: Debugging
@@ -126,8 +121,11 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params):
     hc /= distance
 
     # Time start s is negative and is time from peak to start
-    hp = TimeSeries(hp, delta_t=delta_t, epoch=end_time+time_start_s)
-    hc = TimeSeries(hc, delta_t=delta_t, epoch=end_time+time_start_s)
+    print end_time+time_start_s
+    hp = TimeSeries(hp, delta_t=delta_t,
+                    epoch=lal.LIGOTimeGPS(end_time+time_start_s))
+    hc = TimeSeries(hc, delta_t=delta_t,
+                    epoch=lal.LIGOTimeGPS(end_time+time_start_s))
 
     fp.close()
 
