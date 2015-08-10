@@ -158,8 +158,8 @@ class FilterBank(object):
 class FilterBankSkyMax(FilterBank):
     def __init__(self, filename, approximant, filter_length, delta_f, f_lower,
                  dtype, out_plus=None, out_cross=None, **kwds):
-        super(FilterBankSkyMax, self).__init__(filename, approximant,
-                   filter_length, delta_f, f_lower, dtype, out=None, **kwds)
+        super(FilterBankSkyMax, self).__init__(filename, filter_length,
+            delta_f, f_lower, dtype, approximant=approximant, out=None, **kwds)
         self.out_plus = out_plus
         self.out_cross = out_cross
 

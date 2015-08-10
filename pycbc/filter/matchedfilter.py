@@ -344,7 +344,7 @@ class MatchedFilterSkyMaxControl(object):
         delta_t = 1.0 / (self.tlen * stilde.delta_f)
         snr=TimeSeries(snr, epoch=stilde._epoch, delta_t=delta_t, copy=False)
 
-        idx, snrv = events.threshold_real_numpy(snr[stilde.analyze], self.snr_threshold)
+        idx, snrv = events.threshold(snr[stilde.analyze], self.snr_threshold)
 
         if len(idx) == 0:
             return [], 0, 0, [], [], [], []
