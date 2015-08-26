@@ -36,14 +36,10 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
         try:
             if value == 'end_time':
                 # FIXME: Imprecise!
-                # AttributeError: 'dict' has no attribute 'value'
-                # return float(template_params.get_end())
-                return float(template_params.get(value))
+                return float(template_params.get_end())
             else:
-                #return getattr(template_params, value)
-                return template_params[value]
+                return getattr(template_params, value)
         except:
-            raise
             return template_params[value]
 
     mass1 = get_param('mass1')
@@ -99,6 +95,9 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
 
     # Generate the waveform
     # FIXME: should parse list of (l,m)-pairs
+    #   IWH: Code currently checks for existence of all modes, and includes a
+    #        mode if it is present is this not the right behaviour? If not,
+    #        what is?
     for l in (2,3,4,5,6,7,8):
         for m in range(-l,l+1):
             amp_key = 'amp_l%d_m%d' %(l,m)
