@@ -32,7 +32,8 @@ import pycbc.scheme as _scheme
 import inspect
 from pycbc.fft import fft
 from pycbc import pnutils
-from pycbc.waveform import utils as wfutils
+from . import utils as wfutils
+from . import nr_waveform
 import pycbc
 
 default_args = {'spin1x':0, 'spin1y':0, 'spin1z':0, 'spin2x':0, 'spin2y':0,
@@ -137,6 +138,7 @@ for approx_enum in xrange(0, lalsimulation.NumApproximants):
 cpu_sgburst = _lalsim_sgburst_approximants
 
 cpu_td = dict(_lalsim_td_approximants.items())
+cpu_td['NR_hdf5'] = nr_waveform.get_hplus_hcross_from_get_td_waveform
 cpu_fd = _lalsim_fd_approximants
 
 # Waveforms written in CUDA
@@ -497,28 +499,14 @@ _filter_ends["SPAtmplt"] = spa_tmplt_end
 _template_amplitude_norms["SPAtmplt"] = spa_amplitude_factor
 _filter_time_lengths["SPAtmplt"] = spa_length_in_time
 
-
-def seobnrrom_length_in_time(**kwds):
-    """
-    This is a stub for holding the calculation for getting length of the ROM
-    waveforms.
-    """
-    mass1 = kwds['mass1']
-    mass2 = kwds['mass2']
-    spin1z = kwds['spin1z']
-    spin2z = kwds['spin2z']
-    fmin = kwds['f_lower']
-    chi = lalsimulation.SimIMRPhenomBComputeChi(mass1, mass2, spin1z, spin2z)
-    time_length = lalsimulation.SimIMRSEOBNRv2ChirpTimeSingleSpin(
-                               mass1*lal.MSUN_SI, mass2*lal.MSUN_SI, chi, fmin)
-    # FIXME: This is still approximate so add a 10% error margin
-    time_length = time_length * 1.1
-    return time_length
-
-_filter_time_lengths["SEOBNRv1_ROM_SingleSpin"] = seobnrrom_length_in_time
-_filter_time_lengths["SEOBNRv1_ROM_DoubleSpin"] = seobnrrom_length_in_time
-_filter_time_lengths["SEOBNRv2_ROM_SingleSpin"] = seobnrrom_length_in_time
-_filter_time_lengths["SEOBNRv2_ROM_DoubleSpin"] = seobnrrom_length_in_time
+_filter_time_lengths["SEOBNRv1_ROM_SingleSpin"] = \
+                                           nr_waveform.seobnrrom_length_in_time
+_filter_time_lengths["SEOBNRv1_ROM_DoubleSpin"] = \
+                                           nr_waveform.seobnrrom_length_in_time
+_filter_time_lengths["SEOBNRv2_ROM_SingleSpin"] = \
+                                           nr_waveform.seobnrrom_length_in_time
+_filter_time_lengths["SEOBNRv2_ROM_DoubleSpin"] = \
+                                           nr_waveform.seobnrrom_length_in_time
 
 
 def get_waveform_filter(out, template=None, **kwargs):

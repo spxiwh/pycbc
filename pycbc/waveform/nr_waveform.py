@@ -9,8 +9,6 @@ import numpy
 import lal
 import lalsimulation
 
-from .waveform import seobnrrom_length_in_time
-
 from pycbc.types import TimeSeries
 
 def get_data_from_h5_file(filepointer, time_series, key_name):
@@ -133,3 +131,29 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     fp.close()
 
     return hp, hc
+
+def get_hplus_hcross_from_get_td_waveform(**p):
+    """
+    Interface between get_td_waveform and get_hplus_hcross_from_directory above
+    """
+    delta_t = float(p['delta_t'])
+    p['end_time'] = 0.
+    hp, hc = get_hplus_hcross_from_directory(p['numrel_data'], p, delta_t)
+    return hp, hc
+
+def seobnrrom_length_in_time(**kwds):
+    """
+    This is a stub for holding the calculation for getting length of the ROM
+    waveforms.
+    """
+    mass1 = kwds['mass1']
+    mass2 = kwds['mass2']
+    spin1z = kwds['spin1z']
+    spin2z = kwds['spin2z']
+    fmin = kwds['f_lower']
+    chi = lalsimulation.SimIMRPhenomBComputeChi(mass1, mass2, spin1z, spin2z)
+    time_length = lalsimulation.SimIMRSEOBNRv2ChirpTimeSingleSpin(
+                               mass1*lal.MSUN_SI, mass2*lal.MSUN_SI, chi, fmin)
+    # FIXME: This is still approximate so add a 10% error margin
+    time_length = time_length * 1.1
+    return time_length

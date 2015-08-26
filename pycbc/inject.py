@@ -150,20 +150,8 @@ class InjectionSet(object):
             else:
                 f_l = f_lower
 
-            if inj.waveform=='NR_hdf5':
-                # roughly estimate if the injection may overlap with the segment
-                end_time = inj.get_time_geocent()
-                inj_length = sim.SimInspiralTaylorLength(
-                    strain.delta_t, inj.mass1 * lal.MSUN_SI,
-                    inj.mass2 * lal.MSUN_SI, f_l, 0)
-                start_time = end_time - 2 * inj_length
-                if (end_time+1) < t0 or start_time > t1:
-                   continue
-
-                hdf_directory = inj.numrel_data
-                hp, hc = nr_waveform.get_hplus_hcross_from_directory(\
-                                            hdf_directory, inj, strain.delta_t)
-            elif inj.numrel_data != None and inj.numrel_data != "":
+            if inj.numrel_data != None and inj.numrel_data != "" and \
+                    inj.waveform != 'NR_hdf5':
                 # performing NR waveform injection
                 # reading Hp and Hc from the frame files
                 swigrow = self.getswigrow(inj)
