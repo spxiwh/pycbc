@@ -114,6 +114,8 @@ for count, inj in enumerate(inj_list):
     # FIXME: Patricia fix!
     f = h5py.File(inj, 'r')    #Is this the correct index?
     curr_sim.eta = f.attrs['eta']
+    if curr_sim.eta > 0.25 and curr_sim.eta < 0.2501:
+        curr_sim.eta = 0.25
     curr_sim.spin1x = f.attrs['spin1x']
     curr_sim.spin1y = f.attrs['spin1y']
     curr_sim.spin1z = f.attrs['spin1z']
