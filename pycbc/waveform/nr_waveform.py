@@ -116,10 +116,11 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
             hc += - curr_h_real * curr_ylm.imag - curr_h_imag * curr_ylm.real 
 
     # Scale by distance
-    # FIXME: Is this right, what is the NR waveform scaling?? Probably need
-    #        to conver to physical units anyway! (distance is in Mpc)
-    hp /= distance
-    hc /= distance
+    # FIXME: Is this right, what is the NR waveform scaling??
+    #        Currently dividing by distance (in meters), but this should
+    #        probably be mass dependent.    
+    hp /= distance * lal.PC_SI * 1E6
+    hc /= distance * lal.PC_SI * 1E6
 
     # Time start s is negative and is time from peak to start
     print end_time+time_start_s
@@ -129,6 +130,8 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
                     epoch=lal.LIGOTimeGPS(end_time+time_start_s))
 
     fp.close()
+
+    print "Done, returning hp,hc"
 
     return hp, hc
 
