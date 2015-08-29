@@ -116,11 +116,13 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
             hc += - curr_h_real * curr_ylm.imag - curr_h_imag * curr_ylm.real 
 
     # Scale by distance
-    # FIXME: Is this right, what is the NR waveform scaling??
-    #        Currently dividing by distance (in meters), but this should
-    #        probably be mass dependent.    
-    hp /= distance * lal.PC_SI * 1E6
-    hc /= distance * lal.PC_SI * 1E6
+    # FIXME: The original NR scaling is 1M. The steps below scale the distance
+    #        appropriately given a total mass M. The distance is now in Mpc. 
+    #        Is this the correct unit?
+    #       .
+    massMpc = total_mass * lal.MRSUN_SI / ( lal.PC_SI * 1.0e6)
+    hp *= (massMpc/distance)
+    hc *= (massMpc/distance)
 
     # Time start s is negative and is time from peak to start
     print end_time+time_start_s
