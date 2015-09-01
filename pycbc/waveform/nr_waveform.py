@@ -92,9 +92,9 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     time_end_s = time_end_M * lal.MTSUN_SI * total_mass
 
     # Restrict start time if needed
-    flow_start_time = lalsimulation.SimInspiralChirpTimeBound(flower,
+    #flow_start_time = lalsimulation.SimInspiralChirpTimeBound(flower,
                           mass1*lal.MSUN_SI, mass2*lal.MSUN_SI, spin1z, spin2z)
-    #flow_start_time = seobnrrom_length_in_time(**template_params)
+    flow_start_time = seobnrrom_length_in_time(**template_params)
     print -flow_start_time
     print time_start_s
     # t=0 means merger so invert
