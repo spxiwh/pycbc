@@ -74,6 +74,7 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     end_time = get_param('end_time')
     print end_time
     distance = get_param('distance')
+    Mflower = get_param('f_lower_at_1MSUN')
 
     # Sanity checking
     # FIXME: Add more checks!
@@ -93,20 +94,28 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
 
     # Restrict start time if needed
     #flow_start_time = lalsimulation.SimInspiralChirpTimeBound(flower,
-                          mass1*lal.MSUN_SI, mass2*lal.MSUN_SI, spin1z, spin2z)
-    flow_start_time = seobnrrom_length_in_time(**template_params)
-    print -flow_start_time
-    print time_start_s
+    #                      mass1*lal.MSUN_SI, mass2*lal.MSUN_SI, spin1z, spin2z)
+    #flow_start_time = seobnrrom_length_in_time(**template_params)
+    #print -flow_start_time
+    #print time_start_s
     # t=0 means merger so invert
-    flow_start_time = -flow_start_time
-    if flow_start_time > time_start_s:
-        time_start_s = flow_start_time
-        time_start_M = time_start_s / (lal.MTSUN_SI * total_mass)
-    else:
+    #flow_start_time = -flow_start_time
+    #if flow_start_time > time_start_s:
+    #    time_start_s = flow_start_time
+    #    time_start_M = time_start_s / (lal.MTSUN_SI * total_mass)
+    #else:
         # FIXME: Is this the right behaviour
-        err_msg = "WAVEFORM IS NOT LONG ENOUGH. %e %e" \
-                                               %(flow_start_time, time_start_s)
-        raise ValueError(err_msg)
+    #    err_msg = "WAVEFORM IS NOT LONG ENOUGH. %e %e" \
+    #                                           %(flow_start_time, time_start_s)
+    #    raise ValueError(err_msg)
+    
+    # FIXME: I think it is more accurate to use the frequency information from
+    #        the NR waveform as contained in 'f_lower_at_1MSUN'. This avoids
+    #        using inaccurate chirp length estimates.
+    if flower < Mflower / total_mass:
+            err_msg = "WAVEFORM IS NOT LONG ENOUGH TO REACH f_low. %e %e" \
+                                                   %(flower, Mflower / total_mass)
+            raise ValueError(err_msg)
 
     # Generate time array
     time_series = numpy.arange(time_start_s, time_end_s, delta_t)
@@ -183,5 +192,6 @@ def seobnrrom_length_in_time(**kwds):
     time_length = lalsimulation.SimIMRSEOBNRv2ChirpTimeSingleSpin(
                                mass1*lal.MSUN_SI, mass2*lal.MSUN_SI, chi, fmin)
     # FIXME: This is still approximate so add a 10% error margin
-    time_length = time_length * 1.1
+    # FIXME: issues with 10% error margin
+    time_length = 1.1 * time_length
     return time_length
