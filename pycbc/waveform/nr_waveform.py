@@ -74,7 +74,6 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     end_time = get_param('end_time')
     print end_time
     distance = get_param('distance')
-    Mflower = get_param('f_lower_at_1MSUN')
 
     # Sanity checking
     # FIXME: Add more checks!
@@ -84,6 +83,7 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     # First figure out time series that is needed.
     # Demand that 22 mode that is present and use that
     fp = h5py.File(hd5_file_name, 'r')
+    Mflower = fp.attrs['f_lower_at_1MSUN']
     knots = fp['amp_l2_m2']['knots'][:]
     time_start_M = knots[0]
     time_start_s = time_start_M * lal.MTSUN_SI * total_mass
