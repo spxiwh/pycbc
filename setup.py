@@ -45,7 +45,7 @@ try:
               " \n"
               " Using pip: [pip install 'numpy>=1.6.4' --upgrade --user] \n"
               "" % numpy.version.version)
-        exit(1)
+#        exit(1)
 except ImportError:
     pass
                            
@@ -381,6 +381,7 @@ setup (
                'bin/pycbc_inspinjfind',
                'bin/pycbc_write_results_page',
                'bin/pycbc_upload_xml_to_gracedb',
+               'bin/pycbc_add_fref_to_sim_inspiral_table',
                'bin/gstlal/pycbc_calculate_likelihood',
                'bin/gstlal/pycbc_combine_likelihood',
                'bin/gstlal/pycbc_compute_far_from_snr_chisq_histograms',
