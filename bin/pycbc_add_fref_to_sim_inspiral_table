@@ -39,11 +39,16 @@ parser = OptionParser(
 
 parser.add_option("-V", "--verbose", action="store_true", help="print extra debugging information", default=False )
 parser.add_option("-i", "--input-file", action="store", type="string",  help="Input file with sngl_inspiral xml table")
+parser.add_option("-c", "--catalog-file", action="store", type="string",  help="HDF5 catalog file with sngl_inspiral xml table")
 parser.add_option("-o", "--output-file", action="store", type="string",  help="Output file name")
 (opts,args) = parser.parse_args()
 
 if not opts.input_file:
     print >> sys.stderr, "--input-file must be supplied"
+    sys.exit(1)
+
+if not opts.catalog_file:
+    print >> sys.stderr, "--catalog-file must be supplied"
     sys.exit(1)
 
 if not opts.output_file:
@@ -54,14 +59,25 @@ oldxml = utils.load_filename(opts.input_file, gz=opts.input_file.endswith('gz'),
                              contenthandler=ContentHandler)
 oldSimTable = table.get_table(oldxml,"sim_inspiral")
 
+hdfxml = utils.load_filename(opts.catalog_file, gz=opts.catalog_file.endswith('gz'),
+			     contenthandler=ContentHandler)
+
+hdfSimTable = table.get_table(hdfxml, "sim_inspiral")
+
+
 for key in cols.keys():
     if key not in oldSimTable.columnnames:
         oldSimTable.appendColumn(key)
 
 for sim in oldSimTable:
-    fill_missing_columns(sim) 
-    # FIXME: Patricia write this! Currentl f_ref will be 0
-    # sim.f_ref = Whatever you want it to be
+    nrID = sim.numrel_data
+    mtotal = sim.mass1 + sim.mass2
+    for nrsim in hdfSimTable:
+        if nrsim.numrel_data == nrID:
+            fill_missing_columns(sim)
+            sim.f_ref = nrsim.f_lower / (lal.TWOPI * lal.MTSUN_SI * mtotal)
+        else:
+            continue
 
 utils.write_filename(oldxml, opts.output_file,
                      gz=opts.output_file.endswith('gz'))
