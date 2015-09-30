@@ -53,6 +53,9 @@ def legacy_approximant_name(apx):
     use Collin's new tables.
     """
     apx = str(apx)
+    # FIXME: Adding hack for NR until this gets into lalsimulation
+    if apx == 'NR_hdf5':
+        return 'NR_hdf5', -1
     try:
         order = sim.GetOrderFromString(apx)
     except:
