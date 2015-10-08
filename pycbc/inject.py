@@ -54,7 +54,7 @@ def legacy_approximant_name(apx):
     """
     apx = str(apx)
     # FIXME: Adding hack for NR until this gets into lalsimulation
-    if apx == 'NR_hdf5':
+    if apx.startswith('NR_hdf5'):
         return 'NR_hdf5', -1
     try:
         order = sim.GetOrderFromString(apx)
@@ -154,7 +154,7 @@ class InjectionSet(object):
                 f_l = f_lower
 
             if inj.numrel_data != None and inj.numrel_data != "" and \
-                    inj.waveform != 'NR_hdf5':
+                    (not inj.waveform.startswith('NR_hdf5')):
                 # performing NR waveform injection
                 # reading Hp and Hc from the frame files
                 swigrow = self.getswigrow(inj)
