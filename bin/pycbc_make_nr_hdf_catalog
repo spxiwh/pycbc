@@ -17,7 +17,7 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 """
-Patricia to write some description of the code here, also appears in help text.
+This program construct an NR waveform catalog in xml format by reading the relevant NR metadata from the HDF5 file. It also holds the pointers to the NR data directories. Any catalog generated that way can directly be used by lalapps_inspinj.
 """
 
 import sys, argparse
