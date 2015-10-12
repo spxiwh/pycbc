@@ -71,7 +71,8 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     flower = get_param('f_lower')
     theta = get_param('inclination') # Is it???
     # FIXME: Should be phiRef!
-    phi = get_param('coa_phase') # Is it???
+    phi = get_param('phi_ref')
+    #phi = get_param('coa_phase') # Is it???
     end_time = get_param('end_time')
     print end_time
     distance = get_param('distance')
