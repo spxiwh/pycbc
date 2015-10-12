@@ -70,9 +70,9 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     spin2z = get_param('spin2z')
     flower = get_param('f_lower')
     theta = get_param('inclination') # Is it???
-    # FIXME: Should be phiRef!
-    phi = get_param('phi_ref')
-    #phi = get_param('coa_phase') # Is it???
+    # NOTE: This is actually the the reference orbital phase of the NR data.
+    #       However, the xml table does not know the column phi_ref!
+    phi = get_param('coa_phase')
     end_time = get_param('end_time')
     print end_time
     distance = get_param('distance')
