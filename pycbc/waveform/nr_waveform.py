@@ -76,6 +76,9 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     end_time = get_param('end_time')
     print end_time
     distance = get_param('distance')
+    
+    # Reference frequency:
+    fref = get_param('f_ref')
 
     # Sanity checking
     # FIXME: Add more checks!
@@ -166,6 +169,16 @@ def get_hplus_hcross_from_get_td_waveform(**p):
     """
     delta_t = float(p['delta_t'])
     p['end_time'] = 0.
+    
+    # Assign correct reference frequency:
+    fp = h5py.File(p['numrel_data'], 'r')
+    Mflower = fp.attrs['f_lower_at_1MSUN']
+    fp.close()
+    mass1 = p['mass1']
+    mass2 = p['mass2']
+    total_mass = mass1 + mass2
+    p['f_ref'] = Mflower / (total_mass)
+    
     hp, hc = get_hplus_hcross_from_directory(p['numrel_data'], p, delta_t)
     return hp, hc
 
