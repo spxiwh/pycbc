@@ -71,21 +71,21 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     spin2z = get_param('spin2z')
     
     # Add those to make the spin sanity check work:
-    if template_params['spin1x'] == True:
-        spin1x = get_param('spin1x')
-    else: spin1x = 0.0
+    if 'spin1x' not in template_params:
+        template_params['spin1x'] = 0.0
+    spin1x = get_param('spin1x')
     
-    if template_params['spin1y'] == True:
-        spin1y = get_param('spin1y')
-    else: spin1y = 0.0
+    if 'spin1y' not in template_params:
+        template_params['spin1y'] = 0.0
+    spin1y = get_param('spin1y')
     
-    if template_params['spin2x'] == True:
-        spin2x = get_param('spin2x')
-    else: spin2x = 0.0
+    if 'spin2x' not in template_params:
+        template_params['spin2x'] = 0.0
+    spin2x = get_param('spin2x')
         
-    if template_params['spin2y'] == True:
-        spin2y = get_param('spin2y')
-    else: spin2y = 0.0
+    if 'spin2y' not in template_params:
+        template_params['spin2y'] = 0.0
+    spin2y = get_param('spin2y')
     
     flower = get_param('f_lower')
     theta = get_param('inclination') # Is it???
@@ -102,9 +102,11 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     
     # Reference frequency:
     #FIXME: Does this mess up xml tables?
-    if template_params['f_ref'] == True:
-        f_ref = fp.attrs['f_lower_at_1MSUN'] / total_mass
-    else: f_ref = fp.attrs['f_lower_at_1MSUN'] / total_mass
+    if 'f_ref' in template_params:
+        template_params['f_ref'] = fp.attrs['f_lower_at_1MSUN'] / total_mass
+    else: template_params['f_ref'] = fp.attrs['f_lower_at_1MSUN'] / total_mass
+    f_ref = get_param('f_ref')
+    print "The reference frequency has been changed to %1.5f" %f_ref
 
     # Sanity checking: make sure intrinsic template parameters are consistent
     # with the NR metadata.    
@@ -227,6 +229,7 @@ def get_hplus_hcross_from_get_td_waveform(**p):
     mass2 = p['mass2']
     total_mass = mass1 + mass2
     p['f_ref'] = Mflower / (total_mass)
+    print "The reference frequency has been set to %1.5f" %p['f_ref']
     
     hp, hc = get_hplus_hcross_from_directory(p['numrel_data'], p, delta_t)
     return hp, hc
