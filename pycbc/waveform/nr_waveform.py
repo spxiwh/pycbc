@@ -66,28 +66,76 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     mass1 = get_param('mass1')
     mass2 = get_param('mass2')
     total_mass = mass1 + mass2
-    spin1z = get_param('spin2z')
+    
+    spin1z = get_param('spin1z')
     spin2z = get_param('spin2z')
+    
+    # Add those to make the spin sanity check work:
+    if template_params['spin1x'] == True:
+        spin1x = get_param('spin1x')
+    else: spin1x = 0.0
+    
+    if template_params['spin1y'] == True:
+        spin1y = get_param('spin1y')
+    else: spin1y = 0.0
+    
+    if template_params['spin2x'] == True:
+        spin2x = get_param('spin2x')
+    else: spin2x = 0.0
+        
+    if template_params['spin2y'] == True:
+        spin2y = get_param('spin2y')
+    else: spin2y = 0.0
+    
     flower = get_param('f_lower')
     theta = get_param('inclination') # Is it???
+    
     # NOTE: This is actually the reference orbital phase of the NR data.
     #       However, the xml table does not know the column phiRef!
     phi = get_param('coa_phase')
+    
     end_time = get_param('end_time')
-    print end_time
     distance = get_param('distance')
     
+    # Open NR file:
+    fp = h5py.File(hd5_file_name, 'r')
+    
     # Reference frequency:
-    fref = get_param('f_ref')
+    #FIXME: Does this mess up xml tables?
+    if template_params['f_ref'] == True:
+        f_ref = fp.attrs['f_lower_at_1MSUN'] / total_mass
+    else: f_ref = fp.attrs['f_lower_at_1MSUN'] / total_mass
 
-    # Sanity checking
+    # Sanity checking: make sure intrinsic template parameters are consistent
+    # with the NR metadata.    
     # FIXME: Add more checks!
-    # FIXME: Add check that mass ratio is consistent
-    # FIXME: Add check that spins are consistent
-
+    
+    # Add check that mass ratio is consistent
+    eta = fp.attrs['eta']
+    if abs(((mass1 * mass2) / (mass1 + mass2)**2) - eta) > 10**(-3):
+        err_msg = "MASSES ARE INCONSISTENT WITH THE MASS RATIO OF THE NR SIMULATION."
+        raise ValueError(err_msg)
+        
+    # Add check that spins are consistent
+    if (abs(spin1x - fp.attrs['spin1x']) > 10**(-3) or \
+        abs(spin1y - fp.attrs['spin1y']) > 10**(-3) or \
+        abs(spin1z - fp.attrs['spin1z']) > 10**(-3) ):
+        err_msg = "COMPONENTS OF SPIN1 ARE INCONSISTENT WITH THE NR SIMULATION."
+        raise ValueError(err_msg)
+    
+    if (abs(spin2x - fp.attrs['spin2x']) > 10**(-3) or \
+        abs(spin2y - fp.attrs['spin2y']) > 10**(-3) or \
+        abs(spin2z - fp.attrs['spin2z']) > 10**(-3) ):
+        err_msg = "COMPONENTS OF SPIN2 ARE INCONSISTENT WITH THE NR SIMULATION."
+        raise ValueError(err_msg)
+    
+    # add check that the reference phase is consistent
+    if abs( phi - fp.attrs['coa_phase']) > 10**(-3):
+        err_msg = "THE COALESCENCE PHASE PARAMETER IS INCORRECT. USE METADATA VALUE."
+        raise ValueError(err_msg)
+        
     # First figure out time series that is needed.
     # Demand that 22 mode that is present and use that
-    fp = h5py.File(hd5_file_name, 'r')
     Mflower = fp.attrs['f_lower_at_1MSUN']
     knots = fp['amp_l2_m2']['knots'][:]
     time_start_M = knots[0]
@@ -98,6 +146,7 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     time_end_s = time_end_M * lal.MTSUN_SI * total_mass
 
     # Restrict start time if needed
+    print template_params
     est_start_time = seobnrrom_length_in_time(**template_params)
     # t=0 means merger so invert
     est_start_time = -est_start_time
@@ -170,7 +219,7 @@ def get_hplus_hcross_from_get_td_waveform(**p):
     delta_t = float(p['delta_t'])
     p['end_time'] = 0.
     
-    # Assign correct reference frequency:
+    # Assign correct reference frequency for consistency:
     fp = h5py.File(p['numrel_data'], 'r')
     Mflower = fp.attrs['f_lower_at_1MSUN']
     fp.close()
