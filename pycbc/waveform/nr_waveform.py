@@ -61,8 +61,13 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
             else:
                 return getattr(template_params, value)
         except:
-            return template_params[value]
-
+            try:
+                return template_params[value]
+            except:
+                if value in ['spin1x', 'spin1y','spin1z', 'spin2x', 'spin2y', 'spin2']:
+                    # Spins are not provided, default to 0
+                    return 0.0
+            
     mass1 = get_param('mass1')
     mass2 = get_param('mass2')
     total_mass = mass1 + mass2
@@ -70,21 +75,10 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     spin1z = get_param('spin1z')
     spin2z = get_param('spin2z')
     
-    # Add those to make the spin sanity check work:
-    if 'spin1x' not in template_params:
-        template_params['spin1x'] = 0.0
     spin1x = get_param('spin1x')
-    
-    if 'spin1y' not in template_params:
-        template_params['spin1y'] = 0.0
-    spin1y = get_param('spin1y')
-    
-    if 'spin2x' not in template_params:
-        template_params['spin2x'] = 0.0
     spin2x = get_param('spin2x')
-        
-    if 'spin2y' not in template_params:
-        template_params['spin2y'] = 0.0
+    
+    spin1y = get_param('spin1y')
     spin2y = get_param('spin2y')
     
     flower = get_param('f_lower')
