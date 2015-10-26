@@ -84,8 +84,6 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     flower = get_param('f_lower')
     theta = get_param('inclination') # Is it???
     
-    # NOTE: This is actually the reference orbital phase of the NR data.
-    #       However, the xml table does not know the column phiRef!
     phi = get_param('coa_phase')
     
     end_time = get_param('end_time')
@@ -93,6 +91,8 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     
     # Open NR file:
     fp = h5py.File(hd5_file_name, 'r')
+    # Add on intrinsic phase to provided phi
+    phi += fp.attrs['coa_phase']
     
     # Reference frequency:
     #FIXME: Does this mess up xml tables?
@@ -125,11 +125,6 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
         err_msg = "COMPONENTS OF SPIN2 ARE INCONSISTENT WITH THE NR SIMULATION."
         raise ValueError(err_msg)
     
-    # add check that the reference phase is consistent
-    #if abs( phi - fp.attrs['coa_phase']) > 10**(-3):
-    #    err_msg = "THE COALESCENCE PHASE PARAMETER IS INCORRECT. USE METADATA VALUE."
-    #    raise ValueError(err_msg)
-        
     # First figure out time series that is needed.
     # Demand that 22 mode that is present and use that
     Mflower = fp.attrs['f_lower_at_1MSUN']
