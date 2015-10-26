@@ -126,9 +126,9 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
         raise ValueError(err_msg)
     
     # add check that the reference phase is consistent
-    if abs( phi - fp.attrs['coa_phase']) > 10**(-3):
-        err_msg = "THE COALESCENCE PHASE PARAMETER IS INCORRECT. USE METADATA VALUE."
-        raise ValueError(err_msg)
+    #if abs( phi - fp.attrs['coa_phase']) > 10**(-3):
+    #    err_msg = "THE COALESCENCE PHASE PARAMETER IS INCORRECT. USE METADATA VALUE."
+    #    raise ValueError(err_msg)
         
     # First figure out time series that is needed.
     # Demand that 22 mode that is present and use that
@@ -143,7 +143,10 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
 
     # Restrict start time if needed
     print template_params
-    est_start_time = seobnrrom_length_in_time(**template_params)
+    try:
+        est_start_time = seobnrrom_length_in_time(**template_params)
+    except:
+        est_start_time = -time_start_s
     # t=0 means merger so invert
     est_start_time = -est_start_time
     if est_start_time > time_start_s:
@@ -181,10 +184,11 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
             curr_h_real = curr_amp * numpy.cos(curr_phase)
             curr_h_imag = curr_amp * numpy.sin(curr_phase)
             curr_ylm = lal.SpinWeightedSphericalHarmonic(theta, phi, -2, l, m)
-            hp += curr_h_real * curr_ylm.real - curr_h_imag * curr_ylm.imag
+            print curr_ylm
+            hp += curr_h_real * curr_ylm.real + curr_h_imag * curr_ylm.imag
             # FIXME: No idea whether these should be minus or plus, guessing
             #        minus for now. Only affects some polarization phase
-            hc += - curr_h_real * curr_ylm.imag - curr_h_imag * curr_ylm.real 
+            hc += + curr_h_real * curr_ylm.imag - curr_h_imag * curr_ylm.real 
 
     # Scale by distance
     # FIXME: The original NR scaling is 1M. The steps below scale the distance
