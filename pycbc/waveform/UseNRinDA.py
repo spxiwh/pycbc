@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-#! /usr/bin/env python
 # Copyright (C) 2014 Prayush Kumar
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
@@ -39,16 +38,10 @@ import numpy as np
 from numpy.random import random
 import h5py
 
-from optparse import OptionParser
 from math import pow
 
-#import utils
-#phase_from_polarizations = utils.phase_from_polarizations
-#frequency_from_polarizations = utils.frequency_from_polarizations
-#amplitude_from_polarizations = utils.amplitude_from_polarizations
-
 from utils import phase_from_polarizations, frequency_from_polarizations, amplitude_from_polarizations
-from pycbc.types import FrequencySeries, TimeSeries, zeros, real_same_precision_as, complex_same_precision_as, Array
+from pycbc.types import FrequencySeries, TimeSeries, real_same_precision_as, complex_same_precision_as, Array
 import lal
 
 verbose=True
@@ -123,7 +116,7 @@ class nr_wave():
         modeLmin=2, modeLmax=8, skipM0=True, \
         sample_rate=8192, time_length=32, rawdelta_t=-1, \
         totalmass=None, inclination=0, phi=0, distance=1.e6, \
-        verbose=True):
+        verbose=False):
     """ 
 #### Assumptions:
 ### 1. The nr waveform file is uniformly sampled
@@ -164,7 +157,7 @@ class nr_wave():
     self.time_length = time_length 
     self.dt = 1./self.sample_rate
     self.df = 1./self.time_length
-    self.n = self.sample_rate * self.time_length
+    self.n = int(self.sample_rate * self.time_length)
     if self.verbose: print >>sys.stderr, "self.n = ", self.n
     
     # Binary parameters

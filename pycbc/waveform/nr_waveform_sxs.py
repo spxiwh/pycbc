@@ -76,7 +76,7 @@ def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
                     totalmass=total_mass, inclination=theta, phi=phi, \
                     distance=distance*1e6,\
                     ex_order=3, \
-                    verbose=True)
+                    verbose=False)
     
     time_start_s = -nrwav.get_peak_amplitude()[0] * nrwav.dt
     if verbose: print >>sys.stdout, " time_start_s = %f" % time_start_s
