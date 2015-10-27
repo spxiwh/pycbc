@@ -33,6 +33,7 @@ import lal
 import lalsimulation
 
 from pycbc.types import TimeSeries
+from nr_waveform_sxs import get_hplus_hcross_from_sxs
 
 def get_data_from_h5_file(filepointer, time_series, key_name):
     """
@@ -215,8 +216,17 @@ def get_hplus_hcross_from_get_td_waveform(**p):
     delta_t = float(p['delta_t'])
     p['end_time'] = 0.
     
-    # Assign correct reference frequency for consistency:
+    # Re-direct to sxs-format strain reading code
     fp = h5py.File(p['numrel_data'], 'r')
+    # For now, if all groups in the hdf file are directories consider that as
+    # sufficient evidence that this is a strain file
+    if numpy.all( ['.dir' in kk for kk in fp] ):
+      print "YAY"
+      hp, hc = get_hplus_hcross_from_sxs(p['numrel_data'], p, delta_t)
+      fp.close()
+      return hp, hc
+
+    # Assign correct reference frequency for consistency:
     Mflower = fp.attrs['f_lower_at_1MSUN']
     fp.close()
     mass1 = p['mass1']
