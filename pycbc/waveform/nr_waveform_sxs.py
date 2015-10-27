@@ -29,10 +29,12 @@ from numpy import where, ceil, log2
 
 import lal
 from pycbc.types import TimeSeries
+from pycbc.pnutils import mtotal_eta_to_mass1_mass2
 
-from . import UseNRinDA
 import nr_waveform
+from . import UseNRinDA
 
+MAX_NR_LENGTH = 100000
 
 def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
                                   taper=True, verbose=False):
@@ -52,12 +54,19 @@ def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
     #
     # Get relevant binary parameters
     #
-    total_mass = get_param('mass1') + get_param('mass2')
+    mass1      = get_param('mass1')
+    mass2      = get_param('mass2')
+    total_mass = mass1 + mass2
     theta      = get_param('inclination')
     phi = 0.#template_params['coa_phase']
     distance   = get_param('distance')
     end_time   = get_param('end_time') # FIXME
     f_lower     = get_param('f_lower')
+    
+    try: taper = get_param('taper')
+    except: pass
+    try: verbose= get_param('verbose')
+    except: pass
 
     if verbose:
         print >> sys.stdout, "mass, theta, phi , distance, end_time = ", \
@@ -70,26 +79,38 @@ def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
     # Figure out how much memory to allocate 
     #
     estimated_length = nr_waveform.seobnrrom_length_in_time(**template_params)
-    estimated_length_pow2 = 2**ceil(log2( estimated_length * 1.1 ))
+    #estimated_length_pow2 = 2**ceil(log2(1.2*estimated_length * 20./total_mass))
+    estimated_length_pow2 = 2**ceil(log2(MAX_NR_LENGTH*total_mass*lal.MTSUN_SI))
+    if verbose:
+      print "estimated length = ", estimated_length, " used = ", estimated_length_pow2
     #
     # Read in the waveform from file & rescale it
     #
-    nrwav = UseNRinDA.nr_wave(filename=hdf5_file_name, modeLmax=2, \
+    idx = 0
+    while True:
+      try:
+        if verbose: print "\n >>try %d at reading waveform" % idx
+        idx += 1
+        nrwav = UseNRinDA.nr_wave(filename=hdf5_file_name, modeLmax=2, \
                     sample_rate=1./delta_t, time_length=estimated_length_pow2, \
                     totalmass=total_mass, inclination=theta, phi=phi, \
                     distance=distance*1e6,\
                     ex_order=3, \
                     verbose=verbose)
+        break
+      except ValueError:
+        estimated_length_pow2 *= 2
+
     if verbose: 
       print >> sys.stdout, "Waveform read from %s" % hdf5_file_name
       sys.stdout.flush()
     #
     # Condition the waveform
     #
-    t2_opt = [1000,2000]
-    t_option = [100,t2_opt[0],t2_opt[1],50,100]
-
-    t_filter = t_option[0] + t_option[1]
+    upwin_t_start = 100
+    upwin_t_width = 2000
+    downwin_t_width = 100
+    t_filter    = upwin_t_start + upwin_t_width
     m_lower = nrwav.get_lowest_binary_mass( t_filter, f_lower)
     
     # Check if re-scaling to input total mass is allowed by the tapering choice
@@ -99,8 +120,12 @@ def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
 
     # Taper the waveforma
     if taper:
-      nrhpRaw, nrhcRaw, hp, hc = UseNRinDA.blend(nrwav, total_mass, nrwav.sample_rate,\
-                                      nrwav.time_length, t_option, WinID=1)
+      hp, hc = nrwav.taper_filter_waveform(ttaper1=upwin_t_start,\
+                    ttaper2=upwin_t_width, ftaper3=0.1,\
+                    ttaper4=downwin_t_width,\
+                    verbose=verbose)
+      #nrhpRaw, nrhcRaw, hp, hc = UseNRinDA.blend(nrwav, total_mass, nrwav.sample_rate,\
+      #                                nrwav.time_length, t_option, WinID=1)
     else:
       hp, hc = [nrwav.rescaled_hp, nrwav.rescaled_hc]
 
