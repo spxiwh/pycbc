@@ -30,8 +30,8 @@ from numpy import where, ceil, log2
 import lal
 from pycbc.types import TimeSeries
 
-from UseNRinDA import nr_wave
-from nr_waveform import seobnrrom_length_in_time
+from . import UseNRinDA
+import nr_waveform
 
 
 def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
@@ -68,10 +68,10 @@ def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
     #
     # Figure out how much memory to allocate 
     #
-    estimated_length = seobnrrom_length_in_time(**template_params)
+    estimated_length = nr_waveform.seobnrrom_length_in_time(**template_params)
     estimated_length_pow2 = 2**ceil(log2( estimated_length * 1.1 ))
     #
-    nrwav = nr_wave(filename=hdf5_file_name, modeLmax=2, \
+    nrwav = UseNRinDA.nr_wave(filename=hdf5_file_name, modeLmax=2, \
                     sample_rate=1./delta_t, time_length=estimated_length_pow2, \
                     totalmass=total_mass, inclination=theta, phi=phi, \
                     distance=distance*1e6,\

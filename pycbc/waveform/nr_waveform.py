@@ -33,7 +33,7 @@ import lal
 import lalsimulation
 
 from pycbc.types import TimeSeries
-from nr_waveform_sxs import get_hplus_hcross_from_sxs
+from . import nr_waveform_sxs
 
 def get_data_from_h5_file(filepointer, time_series, key_name):
     """
@@ -221,8 +221,7 @@ def get_hplus_hcross_from_get_td_waveform(**p):
     # For now, if all groups in the hdf file are directories consider that as
     # sufficient evidence that this is a strain file
     if numpy.all( ['.dir' in kk for kk in fp] ):
-      print "YAY"
-      hp, hc = get_hplus_hcross_from_sxs(p['numrel_data'], p, delta_t)
+      hp, hc = nr_waveform_sxs.get_hplus_hcross_from_sxs(p['numrel_data'], p, delta_t)
       fp.close()
       return hp, hc
 
