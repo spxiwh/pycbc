@@ -44,7 +44,7 @@ from utils import phase_from_polarizations, frequency_from_polarizations, amplit
 from pycbc.types import FrequencySeries, TimeSeries, real_same_precision_as, complex_same_precision_as, Array
 import lal
 
-verbose=True
+verbose=False
 QM_MTSUN_SI=4.925492321898864e-06
 
 
@@ -100,6 +100,73 @@ def convert_lalREAL8TimeSeries_to_TimeSeries( h ):
 def zero_pad_beginning( h, steps=1 ):
   h.data = np.roll( h.data, steps )
   return h
+
+def blend(hin, mm, sample, time, t_opt, WinID=-1):
+    # Only dealing with real part, don't do hc calculations                   
+    # t_opt is length-5 array describing multiples of mm
+    # Returns length-5 array of TimeSeries (1 per blending)
+    #{{{
+    hp0, hc0 = hin.rescale_to_totalmass( mm )
+    hp0._epoch = hc0._epoch = 0
+    amp = TimeSeries(np.sqrt(hp0**2 + hc0**2), copy=True, delta_t=hp0.delta_t)
+    max_a, max_a_index = amp.abs_max_loc()
+    if verbose:
+      print "\n\n In blend:\nTotal Mass = %f, len(hp0,hc0) = %d, %d = %f s" %\
+            (mm, len(hp0), len(hc0), hp0.sample_times[-1]-hp0.sample_times[0])
+      print "Waveform max = %e, located at %d" % (max_a, max_a_index)
+    #amp_after_peak = amp
+    #amp_after_peak[:max_a_index] = 0
+    mtsun = lal.MTSUN_SI
+    amp_after_peak = amp[max_a_index:]
+    iA, vA = min(enumerate(amp_after_peak),key=lambda x:abs(x[1]-0.01*max_a))
+    iA += max_a_index
+    #iA, vA = min(enumerate(amp_after_peak),key=lambda x:abs(x[1]-0.01*max_a))
+    iB, vB = min(enumerate(amp_after_peak),key=lambda x:abs(x[1]-0.1*max_a))
+    iB += max_a_index
+    if iA <= max_a_index:
+      if verbose: print >>sys.stdout,"iA = %d, iB = %d, vA = %e, vB = %e" % (iA,iB,vA,vB)
+      sys.stdout.flush()
+      raise RuntimeError("Couldnt find amplitude threshold time iA")
+      # do something
+      #fout = open('hpdump.dat','w+')
+      #for i in range( len(amp) ):
+      #  if i > max_a_index and amp[i] == 0: break
+      #  fout.write('%e\t%e\n' % (amp.sample_times[i],amp[i]))
+      #fout.close()
+      # Find the point the hard way
+      target_amp = max_a * 0.01
+      tmp_data = amp.data
+      for idx in range( max_a_index, len(amp) ):
+        if tmp_data[idx] < target_amp: break
+      iA = idx
+      if verbose: print "Newfound iA = %d" % iA
+      # Yet another way
+      amp_after_peak = amp[max_a_index:]
+      iA, vA = min(enumerate(amp_after_peak),key=lambda x:abs(x[1]-0.01*max_a))
+      iA += max_a_index
+      if verbose: print "Newfound iA another way = %d" % iA
+      raise RuntimeError("Had to find amplitude threshold the hard way")
+    if iB <= max_a_index:
+      raise RuntimeError("Couldnt find amplitude threshold time iB")
+      # this doesn't happen yet
+      pass
+    if verbose: print "NEW: iA = %d, iB = %d, vA = %e, vB = %e" % (iA, iB, vA, vB)
+    t = [ [ t_opt[0]*mm,500*mm,hp0.sample_times.data[iA]/mtsun,hp0.sample_times.data[iA]/mtsun+t_opt[3]*mm], # Prayush's E
+          [ t_opt[0]*mm,t_opt[1]*mm,hp0.sample_times.data[iA]/mtsun,hp0.sample_times.data[iA]/mtsun+t_opt[3]*mm ],
+          [ t_opt[0]*mm,t_opt[1]*mm,hp0.sample_times.data[iB]/mtsun,hp0.sample_times.data[iB]/mtsun+t_opt[4]*mm ],
+          [ t_opt[0]*mm,t_opt[2]*mm,hp0.sample_times.data[iA]/mtsun,hp0.sample_times.data[iA]/mtsun+t_opt[3]*mm ],
+          [ t_opt[0]*mm,t_opt[2]*mm,hp0.sample_times.data[iB]/mtsun,hp0.sample_times.data[iB]/mtsun+t_opt[4]*mm ] ]
+    hphc = []
+    hphc.append(hp0)
+    hphc.append(hc0)
+    for i in range(len(t)):
+      if (WinID >= 0 and WinID < len(t)) and i != WinID: continue
+      if verbose: print "Testing window with t = ", t[i]
+      hphc.append(hin.blending_function(hp0=hp0,t=t[i],sample_rate=sample,time_length=time))
+      hphc.append(hin.blending_function(hp0=hc0,t=t[i],sample_rate=sample,time_length=time))
+    if verbose: print "No of blending windows being tested = %d" % (len(hphc)/2 - 1)
+    return hphc
+    #}}}
 
 
 ######################################################################
@@ -806,7 +873,7 @@ class nr_wave():
                         f_filter=f_filter)
     return hpnew
   #
-  def blending_function( self, hp0, t, sample_rate, time_length, f_filter=14. ):
+  def blending_function( self, hp0, t, sample_rate, time_length, f_filter=-1 ):
     # Blending function of the waveform using McKechan's function (2010 paper) and high pass filter
     # h0 is TimeSeries - rescaled to some mass
     # works for real part only, or you could do real and imaginary part separately if you need both
@@ -816,7 +883,7 @@ class nr_wave():
     #print t
     #print t1,t2,t3,t4
     #print i1,i2,i3,i4
-    time_array = hp0.sample_times.data
+    time_array = hp0.sample_times.data - float( hp0._epoch )
     #
     # Return if window specs are impossible
     if not (i1 < i2 and i2 < i3 and i3 < i4):
@@ -833,8 +900,12 @@ class nr_wave():
     #
     np.seterr(divide='raise',over='raise',under='raise',invalid='raise')
     for i in range(len(region2)):
+      if i==0:
+        region2[i] = 0
+        continue
       try:
-        region2[i] = 1./(np.exp( ((t2-t1)/(time_array[i+i1]-t1)) + ((t2-t1)/(time_array[i+i1]-t2)) ) + 1)
+        region2[i] = 1./(np.exp( ((t2-t1)/(time_array[i+i1]-t1)) + \
+                          ((t2-t1)/(time_array[i+i1]-t2)) ) + 1)
       except:
         if time_array[i+i1]>0.9*t1 and time_array[i+i1]<1.1*t1:
           region2[i] = 0
@@ -842,30 +913,50 @@ class nr_wave():
           region2[i] = 1.
     for i in range(len(region4)):
       try:
-        region4[i] = 1./(np.exp( ((t3-t4)/(time_array[i+i3]-t3)) + ((t3-t4)/(time_array[i+i3]-t4)) ) + 1)
+        region4[i] = 1./(np.exp( ((t3-t4)/(time_array[i+i3]-t3)) + \
+                          ((t3-t4)/(time_array[i+i3]-t4)) ) + 1)
       except:
         if time_array[i+i3]>0.9*t3 and time_array[i+i3]<1.1*t3:
           region4[i] = 1.
         if time_array[i+i3]>0.9*t4 and time_array[i+i3]<1.1*t4:
           region4[i] = 0
     func = np.concatenate((region1,region2,region3,region4,region5)) # combine regions into one array
-    hp_blended = np.zeros(len(hp0.data))
-    for i in range(len(func)):
-      try:
-        hp_blended[i] = func[i]*hp0.data[i] # creates array of blended data
-    # hc_blended = func*hc0.data
-      except:
-        hp_blended[i] = 0
+    '''
+    import matplotlib.pyplot as plt
+    plt.plot(np.arange(len(region1)), region1, 'b-x')
+    offset = len(region1)
+    plt.hold(True)
+    plt.plot(np.arange(len(region2))+offset,region2, 'r-x')
+    offset += len(region2)
+    plt.plot(np.arange(len(region3))+offset,region3, 'g-x',)
+    offset += len(region3)
+    plt.plot(np.arange(len(region4))+offset,region4, 'k-x')
+    offset += len(region4)
+    plt.plot(np.arange(len(region5))+offset,region5, 'y-x')
+    plt.show()
+    '''
+
+    hp_blended = hp0.data * func
+
+    #hp_blended = np.zeros(len(hp0.data))
+    #for i in range(len(func)):
+    #  try:
+    #    hp_blended[i] = func[i]*hp0.data[i] # creates array of blended data
+    #  except:
+    #    hp_blended[i] = 0
     hp = TimeSeries(hp_blended,dtype=hp0.dtype,delta_t=hp0.delta_t,epoch=hp0._epoch) # turn back into TimeSeries
-    # hc = TimeSeries(hc_blended,dtype=hc0.dtype,delta_t=hc0.delta_t,epoch=hc0._epoch)
     #
     # High pass filter the waveform
-    hplal = convert_TimeSeries_to_lalREAL8TimeSeries( hp )
-    # hclal = convert_TimeSeries_to_lalREAL8TimeSeries( hc )
-    lal.HighPassREAL8TimeSeries( hplal, f_filter, 0.9, 8 )
-    # lal.HighPassREAL8TimeSeries( hclal, f_filter, 0.9, 8 )
-    hpnew = convert_lalREAL8TimeSeries_to_TimeSeries( hplal )
-    # hcnew = convert_lalREAL8TimeSeries_to_TimeSeries( hclal )
+    #
+    if f_filter > 0:
+      hplal = convert_TimeSeries_to_lalREAL8TimeSeries( hp )
+      # hclal = convert_TimeSeries_to_lalREAL8TimeSeries( hc )
+      lal.HighPassREAL8TimeSeries( hplal, f_filter, 0.9, 8 )
+      # lal.HighPassREAL8TimeSeries( hclal, f_filter, 0.9, 8 )
+      hpnew = convert_lalREAL8TimeSeries_to_TimeSeries( hplal )
+      # hcnew = convert_lalREAL8TimeSeries_to_TimeSeries( hclal )
+    else: hpnew = hp
+
     return hpnew
   #}}}
 

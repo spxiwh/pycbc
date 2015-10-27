@@ -35,7 +35,7 @@ import nr_waveform
 
 
 def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
-                                  verbose=False):
+                                  taper=True, verbose=False):
     if verbose:
         print >>sys.stdout, " \n\n\nIn get_hplus_hcross_from_sxs.."
         sys.stdout.flush()
@@ -57,7 +57,8 @@ def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
     phi = 0.#template_params['coa_phase']
     distance   = get_param('distance')
     end_time   = get_param('end_time') # FIXME
-    
+    f_lower     = get_param('f_lower')
+
     if verbose:
         print >> sys.stdout, "mass, theta, phi , distance, end_time = ", \
                           total_mass, theta, phi, distance, end_time
@@ -71,26 +72,59 @@ def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
     estimated_length = nr_waveform.seobnrrom_length_in_time(**template_params)
     estimated_length_pow2 = 2**ceil(log2( estimated_length * 1.1 ))
     #
+    # Read in the waveform from file & rescale it
+    #
     nrwav = UseNRinDA.nr_wave(filename=hdf5_file_name, modeLmax=2, \
                     sample_rate=1./delta_t, time_length=estimated_length_pow2, \
                     totalmass=total_mass, inclination=theta, phi=phi, \
                     distance=distance*1e6,\
                     ex_order=3, \
-                    verbose=False)
-    
-    time_start_s = -nrwav.get_peak_amplitude()[0] * nrwav.dt
-    if verbose: print >>sys.stdout, " time_start_s = %f" % time_start_s
+                    verbose=verbose)
+    if verbose: 
+      print >> sys.stdout, "Waveform read from %s" % hdf5_file_name
+      sys.stdout.flush()
     #
-    hp = nrwav.rescaled_hp
-    hc = nrwav.rescaled_hc
+    # Condition the waveform
+    #
+    t2_opt = [1000,2000]
+    t_option = [100,t2_opt[0],t2_opt[1],50,100]
+
+    t_filter = t_option[0] + t_option[1]
+    m_lower = nrwav.get_lowest_binary_mass( t_filter, f_lower)
+    
+    # Check if re-scaling to input total mass is allowed by the tapering choice
+    if m_lower > total_mass:
+      raise IOError("Can rescale down to %f Msun at %fHz, asked for %f Msun" % \
+                            (m_lower, f_lower, total_mass))
+
+    # Taper the waveforma
+    if taper:
+      nrhpRaw, nrhcRaw, hp, hc = UseNRinDA.blend(nrwav, total_mass, nrwav.sample_rate,\
+                                      nrwav.time_length, t_option, WinID=1)
+    else:
+      hp, hc = [nrwav.rescaled_hp, nrwav.rescaled_hc]
+
+    time_start_s = -nrwav.get_peak_amplitude()[0] * nrwav.dt
+    if verbose: 
+      print >>sys.stdout, " time_start_s = %f" % time_start_s
+      sys.stdout.flush()
+    #
     #
     hpExtraIdx = where(hp.data == 0)[0]
     hcExtraIdx = where(hc.data == 0)[0]
     idx = hpExtraIdx[where(hpExtraIdx == hcExtraIdx)[0][0]]
     #
-    #for idx in range(len(hp)):
-    #  if hp[idx] == 0 and hc[idx] == 0: break
+    if verbose:
+      print >>sys.stdout, " Index = %d where waveform ends" % idx
+      sys.stdout.flush()
+
+    for idx in range(len(hp) - 1, 0, -1):
+      if hp[idx] != 0 and hc[idx] != 0: break
     #
+    if verbose:
+      print >>sys.stdout, " Index = %d where waveform ends" % idx
+      sys.stdout.flush()
+
     # FIXME: Correct for length to peak of h22 amplitude, instead of ..
     hp = TimeSeries(hp.data[:idx], delta_t=delta_t,\
                     epoch=lal.LIGOTimeGPS(end_time+time_start_s))
