@@ -31,10 +31,11 @@ import lal
 from pycbc.types import TimeSeries
 from pycbc.pnutils import mtotal_eta_to_mass1_mass2
 
-#import nr_waveform
 from . import UseNRinDA
 
 MAX_NR_LENGTH = 100000
+
+def nextpow2( x ): return int(2**ceil(log2( x )))
 
 def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
                                   taper=True, verbose=False):
@@ -78,8 +79,7 @@ def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
     #
     # Figure out how much memory to allocate 
     #
-    #estimated_length = nr_waveform.seobnrrom_length_in_time(**template_params)
-    estimated_length_pow2 = 2**ceil(log2(MAX_NR_LENGTH*total_mass*lal.MTSUN_SI))
+    estimated_length_pow2 = nextpow2(MAX_NR_LENGTH * total_mass * lal.MTSUN_SI)
     if verbose:
       print "estimated used = ", estimated_length_pow2
     #

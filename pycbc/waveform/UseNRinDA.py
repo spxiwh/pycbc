@@ -45,11 +45,6 @@ from pycbc.types import FrequencySeries, TimeSeries, real_same_precision_as, com
 import lal
 
 verbose=False
-QM_MTSUN_SI=4.925492321898864e-06
-
-
-def nextpow2( x ): return int(2**ceil(log2( x )))
-  
 
 def convert_TimeSeries_to_lalREAL8TimeSeries( h, name=None ):
   tmp = lal.CreateREAL8Sequence( len(h) )
