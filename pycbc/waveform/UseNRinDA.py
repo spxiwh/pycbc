@@ -101,73 +101,6 @@ def zero_pad_beginning( h, steps=1 ):
   h.data = np.roll( h.data, steps )
   return h
 
-def blend(hin, mm, sample, time, t_opt, WinID=-1):
-    # Only dealing with real part, don't do hc calculations                   
-    # t_opt is length-5 array describing multiples of mm
-    # Returns length-5 array of TimeSeries (1 per blending)
-    #{{{
-    hp0, hc0 = hin.rescale_to_totalmass( mm )
-    hp0._epoch = hc0._epoch = 0
-    amp = TimeSeries(np.sqrt(hp0**2 + hc0**2), copy=True, delta_t=hp0.delta_t)
-    max_a, max_a_index = amp.abs_max_loc()
-    if verbose:
-      print "\n\n In blend:\nTotal Mass = %f, len(hp0,hc0) = %d, %d = %f s" %\
-            (mm, len(hp0), len(hc0), hp0.sample_times[-1]-hp0.sample_times[0])
-      print "Waveform max = %e, located at %d" % (max_a, max_a_index)
-    #amp_after_peak = amp
-    #amp_after_peak[:max_a_index] = 0
-    mtsun = lal.MTSUN_SI
-    amp_after_peak = amp[max_a_index:]
-    iA, vA = min(enumerate(amp_after_peak),key=lambda x:abs(x[1]-0.01*max_a))
-    iA += max_a_index
-    #iA, vA = min(enumerate(amp_after_peak),key=lambda x:abs(x[1]-0.01*max_a))
-    iB, vB = min(enumerate(amp_after_peak),key=lambda x:abs(x[1]-0.1*max_a))
-    iB += max_a_index
-    if iA <= max_a_index:
-      if verbose: print >>sys.stdout,"iA = %d, iB = %d, vA = %e, vB = %e" % (iA,iB,vA,vB)
-      sys.stdout.flush()
-      raise RuntimeError("Couldnt find amplitude threshold time iA")
-      # do something
-      #fout = open('hpdump.dat','w+')
-      #for i in range( len(amp) ):
-      #  if i > max_a_index and amp[i] == 0: break
-      #  fout.write('%e\t%e\n' % (amp.sample_times[i],amp[i]))
-      #fout.close()
-      # Find the point the hard way
-      target_amp = max_a * 0.01
-      tmp_data = amp.data
-      for idx in range( max_a_index, len(amp) ):
-        if tmp_data[idx] < target_amp: break
-      iA = idx
-      if verbose: print "Newfound iA = %d" % iA
-      # Yet another way
-      amp_after_peak = amp[max_a_index:]
-      iA, vA = min(enumerate(amp_after_peak),key=lambda x:abs(x[1]-0.01*max_a))
-      iA += max_a_index
-      if verbose: print "Newfound iA another way = %d" % iA
-      raise RuntimeError("Had to find amplitude threshold the hard way")
-    if iB <= max_a_index:
-      raise RuntimeError("Couldnt find amplitude threshold time iB")
-      # this doesn't happen yet
-      pass
-    if verbose: print "NEW: iA = %d, iB = %d, vA = %e, vB = %e" % (iA, iB, vA, vB)
-    t = [ [ t_opt[0]*mm,500*mm,hp0.sample_times.data[iA]/mtsun,hp0.sample_times.data[iA]/mtsun+t_opt[3]*mm], # Prayush's E
-          [ t_opt[0]*mm,t_opt[1]*mm,hp0.sample_times.data[iA]/mtsun,hp0.sample_times.data[iA]/mtsun+t_opt[3]*mm ],
-          [ t_opt[0]*mm,t_opt[1]*mm,hp0.sample_times.data[iB]/mtsun,hp0.sample_times.data[iB]/mtsun+t_opt[4]*mm ],
-          [ t_opt[0]*mm,t_opt[2]*mm,hp0.sample_times.data[iA]/mtsun,hp0.sample_times.data[iA]/mtsun+t_opt[3]*mm ],
-          [ t_opt[0]*mm,t_opt[2]*mm,hp0.sample_times.data[iB]/mtsun,hp0.sample_times.data[iB]/mtsun+t_opt[4]*mm ] ]
-    hphc = []
-    hphc.append(hp0)
-    hphc.append(hc0)
-    for i in range(len(t)):
-      if (WinID >= 0 and WinID < len(t)) and i != WinID: continue
-      if verbose: print "Testing window with t = ", t[i]
-      hphc.append(hin.blending_function(hp0=hp0,t=t[i],sample_rate=sample,time_length=time))
-      hphc.append(hin.blending_function(hp0=hc0,t=t[i],sample_rate=sample,time_length=time))
-    if verbose: print "No of blending windows being tested = %d" % (len(hphc)/2 - 1)
-    return hphc
-    #}}}
-
 
 ######################################################################
 ######################################################################
@@ -301,18 +234,11 @@ class nr_wave():
           self.rawtsamples[modeL][modeM] = TimeSeries(\
                             np.arange(ts.min(), ts.max(), self.rawdelta_t),\
                             delta_t=self.rawdelta_t, epoch=0)
-          #self.rawmodes_real[modeL][modeM] = TimeSeries(\
-          #                  hp_int( self.rawtsamples[2][2] ),\
-          #                  delta_t=self.rawdelta_t, epoch=0)
-          #self.rawmodes_imag[modeL][modeM] = TimeSeries(\
-          #                  hc_int( self.rawtsamples[2][2] ),\
-          #                  delta_t=self.rawdelta_t, epoch=0)
-
           self.rawmodes_real[modeL][modeM] = TimeSeries(\
-                            array([hp_int(t) for t in self.rawtsamples[2][2]]),\
+                            hp_int( self.rawtsamples[2][2] ),\
                             delta_t=self.rawdelta_t, epoch=0)
           self.rawmodes_imag[modeL][modeM] = TimeSeries(\
-                            array([hc_int(t) for t in self.rawtsamples[2][2]]),\
+                            hc_int( self.rawtsamples[2][2] ),\
                             delta_t=self.rawdelta_t, epoch=0)
     #
     elif 'dataset' in self.filetype:
@@ -558,22 +484,6 @@ class nr_wave():
     return self.rescale_wave(M, \
                       inclination=inclination, phi=phi, distance=distance)
   #
-  def resample(self, dt):
-    if not hasattr(self, 'totalmass') or self.totalmass is None:
-      raise RuntimeError("Cannot resample without setting total mass")
-    elif not hasattr(self, 'inclination') or self.inclination is None:
-      raise RuntimeError("Cannot resample total-mass without setting inclination")
-    elif not hasattr(self, 'phi') or self.phi is None:
-      raise RuntimeError("Cannot resample total-mass without setting phi")
-    elif not hasattr(self, 'distance') or self.distance is None:
-      raise RuntimeError("Cannot resample total-mass without setting distance")
-
-    if dt == self.dt: return [self.rescaled_hp, self.rescaled_hc]
-    else:
-      self.dt = dt
-      return self.rescale_wave(self.totalmass, inclination=self.inclination,\
-                                phi=self.phi, distance=self.distance)
-  #
   ####################################################################
   ####################################################################
   ##### Functions to operate on individual modes
@@ -601,23 +511,6 @@ class nr_wave():
         raise IOError("Please provide total-mass to rescale modes to")
     return amplitude_from_polarizations( hre, him )
   #
-  # Returns the phase (in radians) as a function of t (in s or M)
-  #
-  def get_mode_phase(self, totalmass=None, modeL=2, modeM=2, dimensionless=False):
-    if dimensionless:
-      hre = self.rawmodes_real[modeL][modeM]
-      him = self.rawmodes_imag[modeL][modeM]
-    else:
-      # If a physical mass has been provided, returned rescaled amplitude
-      if totalmass is not None:
-        hre, him = self.rescale_mode(totalmass, modeL=modeL, modeM=modeM)
-      elif self.totalmass != None:
-        hre = self.rescaledmodes_real[modeL][modeM]
-        him = self.rescaledmodes_imag[modeL][modeM]
-      elif self.totalmass is None:
-        raise IOError("Please provide total-mass to rescale modes to")
-    return phase_from_polarizations(hre, him)
-  #
   # Returns frequency (in Hz or 1/M) as a function of t (in s or M)
   #
   def get_mode_frequency(self, totalmass=None, modeL=2, modeM=2, dimensionless=False,
@@ -640,96 +533,15 @@ class nr_wave():
 
     return frequency_from_polarizations(hre, him)
   #
-  # Returns amplitude, phase and frequency all in one
-  #
-  def get_mode_amplitude_phase_frequency(self, totalmass=None,\
-                                      modeL=2, modeM=2, dimensionless=False):
-    amp = self.get_mode_amplitude(totalmass=totalmass, \
-                          modeL=modeL, modeM=modeM, dimensionless=dimensionless)
-    phs = self.get_mode_phase( totalmass=totalmass, \
-                          modeL=modeL, modeM=modeM, dimensionless=dimensionless)
-    frq = self.get_mode_frequency(totalmass=totalmass, \
-                          modeL=modeL, modeM=modeM, dimensionless=dimensionless)
-    return [amp, phs, frq]
-  #
   ####################################################################
   ####################################################################
   ##### Functions to operate on polarizations
   ####################################################################
   ####################################################################
   #
-  # Amplitude of polarization
-  # Defaults of "None" for input parameters mean "use those already provided"
-  #
-  def get_polarization_amplitude(self, totalmass=None, inclination=None, \
-                                  phi=None, distance=None):
-    if totalmass is None: totalmass = self.totalmass
-    if inclination is None: inclination = self.inclination
-    if phi is None: phi = self.phi
-    if distance is None: distance = self.distance
-    
-    if totalmass is None: raise IOError("Please provide totalmass")
-    if inclination is None: raise IOError("Please provide inclination")
-    if phi is None: raise IOError("Please provide initial phase angle")
-    if distance is None: raise IOError("Please provide source distance")
-    
-    hp, hc = self.rescale_wave( totalmass, inclination=inclination,
-                                  phi=phi, distance=distance )
-    
-    amp = amplitude_from_polarizations(hp, hc)
-    return amp
-  #
-  # Phase of the complex polarization
-  #
-  def get_polarization_phase(self, totalmass=None, inclination=None, \
-                                  phi=None, distance=None):
-    if totalmass is None: totalmass = self.totalmass
-    if inclination is None: inclination = self.inclination
-    if phi is None: phi = self.phi
-    if distance is None: distance = self.distance
-    
-    if totalmass is None: raise IOError("Please provide totalmass")
-    if inclination is None: raise IOError("Please provide inclination")
-    if phi is None: raise IOError("Please provide initial phase angle")
-    if distance is None: raise IOError("Please provide source distance")
-    
-    hp, hc = self.rescale_wave( totalmass, inclination=inclination,
-                                  phi=phi, distance=distance )
-    
-    phase = phase_from_polarizations(hp, hc)
-    return phase
-  #
-  # Derivative of the polarization phase
-  #
-  def get_polarization_frequency(self, totalmass=None, inclination=None, \
-                                  phi=None, distance=None):
-    if totalmass is None: totalmass = self.totalmass
-    if inclination is None: inclination = self.inclination
-    if phi is None: phi = self.phi
-    if distance is None: distance = self.distance
-    
-    if totalmass is None: raise IOError("Please provide totalmass")
-    if inclination is None: raise IOError("Please provide inclination")
-    if phi is None: raise IOError("Please provide initial phase angle")
-    if distance is None: raise IOError("Please provide source distance")
-    
-    hp, hc = self.rescale_wave( totalmass, inclination=inclination,
-                                  phi=phi, distance=distance )
-    
-    freq = frequency_from_polarizations(hp, hc)
-    return freq
-  #
   ####################################################################
   # Functions related to wave-frequency
   ####################################################################
-  #
-  # Get dimensionless orbital frequency as a function of time (s)
-  #
-  def get_orbital_omega(self, dimensionless=True):
-    if not dimensionless: raise IOError("Only orbital M*Omega available")
-    freq = self.get_mode_frequency(dimensionless=dimensionless)
-    freq.data = freq.data * np.pi
-    return freq
   #
   # Get 2,2-mode GW_frequency in Hz at a given time (M)
   #
@@ -751,28 +563,6 @@ class nr_wave():
                           (index, freq)
     return totalmass,freq
   #
-  # Get the GW frequency at t = 0
-  #
-  def get_starting_frequency(self, totalmass=None):
-    """ # Get the GW frequency at t = 0. This implementation is naive. """
-    return self.get_frequency_t(t, totalmass=totalmass)
-  #
-  # Get the 2,2-mode GW frequency in Hz at the peak of |h22|
-  #
-  def get_peak_frequency(self, totalmass=None):
-    """ Get the 2,2-mode GW frequency in Hz at the peak of |h22|. """
-    if totalmass is None:
-      if self.totalmass is not None: totalmass = self.totalmass
-      else: raise IOError("Need to set the total-mass first")
-    
-    amp = self.get_mode_amplitude(totalmass=totalmass, dimensionless=False)
-    frq = self.get_mode_frequency(totalmass=totalmass, dimensionless=False)
-    #iStart = int((self.rawdelta_t*totalmass*QM_MTSUN_SI/hp0.delta_t)*len(self.rawtsamples)*3./4.)
-    iStart = int((self.rawtsamples[2][2][-1] - self.rawtsamples[2][2][0])*3./4. * totalmass * lal.MTSUN_SI * self.sample_rate)
-    for idx in range(iStart, len(amp)):
-      if amp[idx+1] < amp[idx]: break
-    iMax = idx
-    return [iMax, frq.data[iMax]]
   def get_lowest_binary_mass(self, t, f_lower):
     """This function gives the total mass corresponding to a given starting time
     in the NR waveform, and a desired physical lower frequency cutoff.
@@ -808,28 +598,6 @@ class nr_wave():
   # Strain conditioning
   ####################################################################
   ###################################################################
-  def window_waveform(self, hpsamp=None, hcsamp=None, eps=0.001, winstart=0, wintype="planck-taper"):
-    """Window the waveform to reduce frequency oscillations at the beginning"""
-    if 'planck' not in wintype: 
-      raise IOError("Only Planck-taper window available")
-    if hpsamp and hcsamp: hp0, hc0 = [hpsamp, hcsamp]
-    elif self.rescaled_hp is not None and self.rescaled_hc is not None:
-      totalmass = self.totalmass
-      hp0, hc0 = [self.rescaled_hp, self.rescaled_hc]
-    else: raise IOError("Please provide either the total mass (and strain)")
-    #
-    for i in range( len(hp0) ):
-      if hp0[i]==0 and hc0[i]==0: break
-    N = i #len(hp0)
-    window_array = planck_window( N=N, eps=eps, winstart=winstart )
-    if len(window_array) < len(hp0):
-      window_array = append(window_array, ones(len(hp0) - len(window_array)))
-    #    
-    hpret = TimeSeries(window_array*hp0.data, \
-        dtype=real_same_precision_as(hp0), delta_t=hp0.delta_t, copy=True)
-    hcret = TimeSeries(window_array*hc0.data, \
-        dtype=real_same_precision_as(hc0), delta_t=hp0.delta_t, copy=True)
-    return [hpret, hcret]
   #
   def taper_filter_waveform( self, hpsamp=None, hcsamp=None, tapermethod='planck', \
             ttaper1=100, ttaper2=1000, ftaper3=0.1, ttaper4=100., \
@@ -994,160 +762,6 @@ class nr_wave():
     return hp, hc
     #}}}
   #
-  def taper_filter_waveform_old( self, hpsamp=None, hcsamp=None, \
-            ntaper1=100, ntaper2=1100, ntaper3=-1, ntaper4=-1, npad=00, f_filter=10. ):
-    """Tapers using a cosine (Tukey) window and high-pass filters"""
-    #{{{
-    if hpsamp and hcsamp: hp0, hc0 = [hpsamp, hcsamp]
-    elif self.rescaled_hp is not None and self.rescaled_hc is not None:
-      totalmass = self.totalmass
-      hp0, hc0 = [self.rescaled_hp, self.rescaled_hc]
-    else: raise IOError("Please provide either the total mass (and strain)")
-    # Check windowing extents
-    if ntaper1 > ntaper2 or ntaper2 > ntaper3 or ntaper3 > ntaper4:
-      raise IOError("Invalid window configuration with [%d,%d,%d,%d]" %\
-        (ntaper1,ntaper2,ntaper3,ntaper4))
-    #
-    hp = TimeSeries( hp0.data, dtype=hp0.dtype, delta_t=hp0.delta_t, epoch=hp0._epoch )
-    hc = TimeSeries( hc0.data, dtype=hc0.dtype, delta_t=hc0.delta_t, epoch=hc0._epoch )
-    # Get actual waveform length
-    for idx in np.arange( len(hp)-1, 0, -1 ):
-      if hp[idx]==0 and hc[idx]==0: break
-    N = idx #np.where( hp.data == 0 )[0][0]
-    # Check npad
-    if abs(len(hp) - N) < npad:
-      print >>sys.stdout, "Ignoring npad..\n"
-      npad = 0
-    else:
-      # Prepend some zeros to the waveform (assuming there are ''npad'' zeros at the end)
-      hp = zero_pad_beginning( hp, steps=npad )
-      hc = zero_pad_beginning( hc, steps=npad )
-    #
-    # Construct the taper window
-    win = np.zeros(npad+ntaper1) # padded portion
-    win12 = 0.5 + 0.5*np.array([np.cos( np.pi*(float(j-ntaper1)/float(ntaper2-\
-                          ntaper1) - 1)) for j in np.arange(ntaper1,ntaper2)])
-    win = np.append(win, win12)
-    win23 = np.ones(ntaper3-ntaper2)
-    win = np.append(win, win23)
-    win34 = 0.5 - 0.5*np.array([np.cos( np.pi*(float(j-ntaper3)/float(ntaper4-\
-                          ntaper3) - 1)) for j in np.arange(ntaper3,ntaper4)])
-    win = np.append(win, win34)
-    win4N = np.zeros(len(hp)-ntaper4)
-    win = np.append(win, win4N)
-    # Taper the waveform
-    hp.data *= win
-    hc.data *= win
-    #
-    # High pass filter the waveform
-    hplal = convert_TimeSeries_to_lalREAL8TimeSeries( hp )
-    hclal = convert_TimeSeries_to_lalREAL8TimeSeries( hc )
-    lal.HighPassREAL8TimeSeries( hplal, f_filter, 0.9, 8 )
-    lal.HighPassREAL8TimeSeries( hclal, f_filter, 0.9, 8 )
-    hpnew = convert_lalREAL8TimeSeries_to_TimeSeries( hplal )
-    hcnew = convert_lalREAL8TimeSeries_to_TimeSeries( hclal )
-    return hpnew, hcnew
-    #}}}
-  #
-  def blending_function_Tukey( self, hp0, t, sample_rate, time_length, f_filter=14. ):
-    t1,t2,t3,t4 = t[0]*lal.MTSUN_SI,t[1]*lal.MTSUN_SI,t[2]*lal.MTSUN_SI,t[3]*lal.MTSUN_SI
-    i1,i2,i3,i4 = int(t1*sample_rate),int(t2*sample_rate),int(t3*sample_rate),int(t4*sample_rate)
-    # Return if window specs are impossible
-    if not (i1 < i2 and i2 < i3 and i3 < i4):
-      print t1, t2, t3, t4
-      print i1, i2, i3, i4
-      raise IOError( "Invalid window configuration" )
-      return hp0
-    hpnew, _ = self.taper_filter_waveform(hpsamp=hp0, hcsamp=hp0, \
-                        ntaper1=i1, ntaper2=i2, ntaper3=i3, ntaper4=i4, \
-                        f_filter=f_filter)
-    return hpnew
-  #
-  def blending_function( self, hp0, t, sample_rate, time_length, f_filter=-1 ):
-    # Blending function of the waveform using McKechan's function (2010 paper) and high pass filter
-    # h0 is TimeSeries - rescaled to some mass
-    # works for real part only, or you could do real and imaginary part separately if you need both
-    # t is a length-4 array of t1, t2, t3, t4 in SOLAR MASSES
-    t1,t2,t3,t4 = t[0]*lal.MTSUN_SI,t[1]*lal.MTSUN_SI,t[2]*lal.MTSUN_SI,t[3]*lal.MTSUN_SI
-    i1,i2,i3,i4 = int(t1*sample_rate),int(t2*sample_rate),int(t3*sample_rate),int(t4*sample_rate)
-    #print t
-    #print t1,t2,t3,t4
-    #print i1,i2,i3,i4
-    time_array = hp0.sample_times.data - float( hp0._epoch )
-    #
-    # Return if window specs are impossible
-    if not (i1 < i2 and i2 < i3 and i3 < i4):
-      print t1, t2, t3, t4
-      print i1, i2, i3, i4
-      raise IOError( "Invalid window configuration" )
-      return hp0
-    #
-    region1 = np.zeros(i1)          # = 0 for t<t1
-    region2 = np.zeros(i2-i1)       # = 1/(exp(blah)+1) for t1<t<t2
-    region3 = np.ones(i3-i2)        # = 1 for t2<t<t3
-    region4 = np.zeros(i4-i3)       # = 1/(exp(blah)+1) for t3<t<t4
-    region5 = np.zeros(len(hp0)-i4) # = 0 for t>t4
-    #
-    np.seterr(divide='raise',over='raise',under='raise',invalid='raise')
-    for i in range(len(region2)):
-      if i==0:
-        region2[i] = 0
-        continue
-      try:
-        region2[i] = 1./(np.exp( ((t2-t1)/(time_array[i+i1]-t1)) + \
-                          ((t2-t1)/(time_array[i+i1]-t2)) ) + 1)
-      except:
-        if time_array[i+i1]>0.9*t1 and time_array[i+i1]<1.1*t1:
-          region2[i] = 0
-        if time_array[i+i1]>0.9*t2 and time_array[i+i1]<1.1*t2:
-          region2[i] = 1.
-    for i in range(len(region4)):
-      try:
-        region4[i] = 1./(np.exp( ((t3-t4)/(time_array[i+i3]-t3)) + \
-                          ((t3-t4)/(time_array[i+i3]-t4)) ) + 1)
-      except:
-        if time_array[i+i3]>0.9*t3 and time_array[i+i3]<1.1*t3:
-          region4[i] = 1.
-        if time_array[i+i3]>0.9*t4 and time_array[i+i3]<1.1*t4:
-          region4[i] = 0
-    func = np.concatenate((region1,region2,region3,region4,region5)) # combine regions into one array
-    '''
-    import matplotlib.pyplot as plt
-    plt.plot(np.arange(len(region1)), region1, 'b-x')
-    offset = len(region1)
-    plt.hold(True)
-    plt.plot(np.arange(len(region2))+offset,region2, 'r-x')
-    offset += len(region2)
-    plt.plot(np.arange(len(region3))+offset,region3, 'g-x',)
-    offset += len(region3)
-    plt.plot(np.arange(len(region4))+offset,region4, 'k-x')
-    offset += len(region4)
-    plt.plot(np.arange(len(region5))+offset,region5, 'y-x')
-    plt.show()
-    '''
-
-    hp_blended = hp0.data * func
-
-    #hp_blended = np.zeros(len(hp0.data))
-    #for i in range(len(func)):
-    #  try:
-    #    hp_blended[i] = func[i]*hp0.data[i] # creates array of blended data
-    #  except:
-    #    hp_blended[i] = 0
-    hp = TimeSeries(hp_blended,dtype=hp0.dtype,delta_t=hp0.delta_t,epoch=hp0._epoch) # turn back into TimeSeries
-    #
-    # High pass filter the waveform
-    #
-    if f_filter > 0:
-      hplal = convert_TimeSeries_to_lalREAL8TimeSeries( hp )
-      # hclal = convert_TimeSeries_to_lalREAL8TimeSeries( hc )
-      lal.HighPassREAL8TimeSeries( hplal, f_filter, 0.9, 8 )
-      # lal.HighPassREAL8TimeSeries( hclal, f_filter, 0.9, 8 )
-      hpnew = convert_lalREAL8TimeSeries_to_TimeSeries( hplal )
-      # hcnew = convert_lalREAL8TimeSeries_to_TimeSeries( hclal )
-    else: hpnew = hp
-
-    return hpnew
   #}}}
 
 
