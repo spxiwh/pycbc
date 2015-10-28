@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2014 Prayush Kumar
+# Copyright (C) 2015 Prayush Kumar
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
 # Free Software Foundation; either version 3 of the License, or (at your
@@ -22,7 +22,8 @@
 #
 # =============================================================================
 #
-#matplotlib.use('Agg')
+import matplotlib
+matplotlib.use('Agg')
 import os
 import sys
 
