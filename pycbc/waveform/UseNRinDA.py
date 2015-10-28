@@ -50,38 +50,6 @@ QM_MTSUN_SI=4.925492321898864e-06
 
 def nextpow2( x ): return int(2**ceil(log2( x )))
   
-def planck_window( N=None, eps=None, one_sided=True, winstart=0 ):
-  #{{{
-  if N is None or eps is None: 
-    raise IOError("Please provide the window length and smoothness")
-  #
-  N = N - winstart
-  win = ones(N)
-  N1 = int(eps * (N - 1.)) + 1
-  den_t1_Zp = 1. + 2. * win / (N - 1.)
-  Zp = 2. * eps * (1./den_t1_Zp + 1./(den_t1_Zp - 2.*eps))
-  win[0:N1] = array(1. / (exp(Zp) + 1.))[0:N1]
-  ##
-  if one_sided is not True:
-    N2 = (1. - eps) * (N - 1.) + 1
-    den_t1_Zm = 1. - 2. * win / (N - 1.)
-    Zm = 2. * eps * (1./den_t1_Zm + 1./(den_t1_Zm - 2.*eps))
-    win[N2:] = array(1. / (exp(Zm) + 1.))[N2:]
-  ##
-  win = append( ones(winstart), win )
-  return win
-  #}}}
-
-def windowing_tanh(waveform_array, bin_to_center_window, sharpness):
-  #{{{
-  waveform_array = asarray(waveform_array)
-  length_of_waveform = size(waveform_array)
-  x = arange(length_of_waveform)
-  window_function = (tanh(sharpness * (x - bin_to_center_window)) + 1.)/2.
-  temp = window_function*waveform_array
-  return temp
-  #}}} 
-
 
 def convert_TimeSeries_to_lalREAL8TimeSeries( h, name=None ):
   tmp = lal.CreateREAL8Sequence( len(h) )
