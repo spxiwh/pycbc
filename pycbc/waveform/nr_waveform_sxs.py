@@ -31,7 +31,7 @@ import lal
 from pycbc.types import TimeSeries
 from pycbc.pnutils import mtotal_eta_to_mass1_mass2
 
-import nr_waveform
+#import nr_waveform
 from . import UseNRinDA
 
 MAX_NR_LENGTH = 100000
@@ -78,11 +78,10 @@ def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
     #
     # Figure out how much memory to allocate 
     #
-    estimated_length = nr_waveform.seobnrrom_length_in_time(**template_params)
-    #estimated_length_pow2 = 2**ceil(log2(1.2*estimated_length * 20./total_mass))
+    #estimated_length = nr_waveform.seobnrrom_length_in_time(**template_params)
     estimated_length_pow2 = 2**ceil(log2(MAX_NR_LENGTH*total_mass*lal.MTSUN_SI))
     if verbose:
-      print "estimated length = ", estimated_length, " used = ", estimated_length_pow2
+      print "estimated used = ", estimated_length_pow2
     #
     # Read in the waveform from file & rescale it
     #
@@ -108,8 +107,9 @@ def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
     # Condition the waveform
     #
     upwin_t_start = 100
-    upwin_t_width = 2000
-    downwin_t_width = 100
+    upwin_t_width = 1000
+    downwin_amp_frac = 0.01
+    downwin_t_width = 50
     t_filter    = upwin_t_start + upwin_t_width
     m_lower = nrwav.get_lowest_binary_mass( t_filter, f_lower)
     
@@ -121,11 +121,9 @@ def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
     # Taper the waveforma
     if taper:
       hp, hc = nrwav.taper_filter_waveform(ttaper1=upwin_t_start,\
-                    ttaper2=upwin_t_width, ftaper3=0.1,\
+                    ttaper2=upwin_t_width, ftaper3=downwin_amp_frac,\
                     ttaper4=downwin_t_width,\
                     verbose=verbose)
-      #nrhpRaw, nrhcRaw, hp, hc = UseNRinDA.blend(nrwav, total_mass, nrwav.sample_rate,\
-      #                                nrwav.time_length, t_option, WinID=1)
     else:
       hp, hc = [nrwav.rescaled_hp, nrwav.rescaled_hc]
 
@@ -134,17 +132,12 @@ def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
       print >>sys.stdout, " time_start_s = %f" % time_start_s
       sys.stdout.flush()
     #
+    # Chop off trailing zeros in the waveform
     #
-    hpExtraIdx = where(hp.data == 0)[0]
-    hcExtraIdx = where(hc.data == 0)[0]
-    idx = hpExtraIdx[where(hpExtraIdx == hcExtraIdx)[0][0]]
-    #
-    if verbose:
-      print >>sys.stdout, " Index = %d where waveform ends" % idx
-      sys.stdout.flush()
-
-    for idx in range(len(hp) - 1, 0, -1):
-      if hp[idx] != 0 and hc[idx] != 0: break
+    i_filter = int(ceil( t_filter * total_mass * lal.MTSUN_SI / nrwav.dt ))
+    hpExtraIdx = where(hp.data[i_filter:] == 0)[0]
+    hcExtraIdx = where(hc.data[i_filter:] == 0)[0]
+    idx = i_filter + hpExtraIdx[where(hpExtraIdx == hcExtraIdx)[0][0]]
     #
     if verbose:
       print >>sys.stdout, " Index = %d where waveform ends" % idx

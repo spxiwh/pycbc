@@ -736,18 +736,20 @@ class nr_wave():
   def get_frequency_t(self, t, totalmass=None):
     """ Get 2,2-mode GW_frequency in Hz at a given time (M) """
     if totalmass is None and self.totalmass > 0: totalmass = self.totalmass
-    if totalmass is None: raise IOError("Please set total-mass")
+    elif totalmass is None: raise IOError("Please set total-mass")
     self.rescale_to_totalmass(totalmass)
     #
     index = int(np.round(t * totalmass * lal.MTSUN_SI * self.sample_rate))
     #
+    NEWindex = 50
     mf = self.get_mode_frequency(dimensionless=False, \
-                                  startIdx=index-100, stopIdx=index+100)
-    NEWindex = 100
+                            startIdx=index-NEWindex, stopIdx=index+NEWindex)
+    freq = (mf.data[NEWindex] + mf.data[NEWindex-1]) / 2.
+
     if self.verbose:
       print >>sys.stderr, "> get_orbital_frequency:: index = %d, freq = %f" % \
-                          (index, mf.data[NEWindex])
-    return totalmass, mf.data[NEWindex]
+                          (index, freq)
+    return totalmass,freq
   #
   # Get the GW frequency at t = 0
   #
