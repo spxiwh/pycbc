@@ -100,7 +100,6 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
         template_params['f_ref'] = fp.attrs['f_lower_at_1MSUN'] / total_mass
     else: template_params['f_ref'] = fp.attrs['f_lower_at_1MSUN'] / total_mass
     f_ref = get_param('f_ref')
-    print "The reference frequency has been changed to %1.5f" %f_ref
 
     # Sanity checking: make sure intrinsic template parameters are consistent
     # with the NR metadata.    
@@ -131,13 +130,10 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     knots = fp['amp_l2_m2']['knots'][:]
     time_start_M = knots[0]
     time_start_s = time_start_M * lal.MTSUN_SI * total_mass
-    print "hybrid start time in M:", time_start_M
-    print "hybrdid start time in s:", time_start_s
     time_end_M = knots[-1]
     time_end_s = time_end_M * lal.MTSUN_SI * total_mass
 
     # Restrict start time if needed
-    print template_params
     try:
         est_start_time = seobnrrom_length_in_time(**template_params)
     except:
@@ -171,15 +167,11 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
             phase_key = 'phase_l%d_m%d' %(l,m)
             if amp_key not in fp.keys() or phase_key not in fp.keys():
                 continue
-            # FIXME: Debugging
-            print "Using %d,%d mode" %(l,m)
-
             curr_amp = get_data_from_h5_file(fp, time_series_M, amp_key)
             curr_phase = get_data_from_h5_file(fp, time_series_M, phase_key)
             curr_h_real = curr_amp * numpy.cos(curr_phase)
             curr_h_imag = curr_amp * numpy.sin(curr_phase)
             curr_ylm = lal.SpinWeightedSphericalHarmonic(theta, phi, -2, l, m)
-            print curr_ylm
             hp += curr_h_real * curr_ylm.real + curr_h_imag * curr_ylm.imag
             # FIXME: No idea whether these should be minus or plus, guessing
             #        minus for now. Only affects some polarization phase
@@ -195,15 +187,12 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     hc *= (massMpc/distance)
 
     # Time start s is negative and is time from peak to start
-    print end_time+time_start_s
     hp = TimeSeries(hp, delta_t=delta_t,
                     epoch=lal.LIGOTimeGPS(end_time+time_start_s))
     hc = TimeSeries(hc, delta_t=delta_t,
                     epoch=lal.LIGOTimeGPS(end_time+time_start_s))
 
     fp.close()
-
-    print "Done, returning hp,hc"
 
     return hp, hc
 
@@ -222,7 +211,6 @@ def get_hplus_hcross_from_get_td_waveform(**p):
     mass2 = p['mass2']
     total_mass = mass1 + mass2
     p['f_ref'] = Mflower / (total_mass)
-    print "The reference frequency has been set to %1.5f" %p['f_ref']
     
     hp, hc = get_hplus_hcross_from_directory(p['numrel_data'], p, delta_t)
     return hp, hc
