@@ -54,8 +54,8 @@ def legacy_approximant_name(apx):
     """
     apx = str(apx)
     # FIXME: Adding hack for NR until this gets into lalsimulation
-    if apx.startswith('NR_hdf5'):
-        return 'NR_hdf5', -1
+    if apx.startswith('NR_hdf5_pycbc'):
+        return 'NR_hdf5_pycbc', -1
     try:
         order = sim.GetOrderFromString(apx)
     except:
