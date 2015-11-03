@@ -40,7 +40,7 @@ default_args = {'spin1x':0, 'spin1y':0, 'spin1z':0, 'spin2x':0, 'spin2y':0,
                 'spin2z':0, 'lambda1':0, 'lambda2':0,
                 'inclination':0, 'distance':1, 'f_final':0, 'f_ref':0,
                 'coa_phase':0, 'amplitude_order':-1, 'phase_order':-1,
-                'spin_order':-1, 'tidal_order':-1}
+                'spin_order':-1, 'tidal_order':-1, 'numrel_data':""}
 
 default_sgburst_args = {'eccentricity':0, 'polarization':0}
 
@@ -60,6 +60,9 @@ def _lalsim_td_waveform(**p):
     lalsimulation.SimInspiralSetSpinOrder(flags, p['spin_order'])
     lalsimulation.SimInspiralSetTidalOrder(flags, p['tidal_order'])
 
+    if p['numrel_data']:
+        print p['numrel_data']
+        lalsimulation.SimInspiralSetNumrelData(flags, str(p['numrel_data']))
     hp, hc = lalsimulation.SimInspiralChooseTDWaveform(float(p['coa_phase']),
                float(p['delta_t']),
                float(pnutils.solar_mass_to_kg(p['mass1'])),
@@ -138,7 +141,7 @@ for approx_enum in xrange(0, lalsimulation.NumApproximants):
 cpu_sgburst = _lalsim_sgburst_approximants
 
 cpu_td = dict(_lalsim_td_approximants.items())
-cpu_td['NR_hdf5'] = nr_waveform.get_hplus_hcross_from_get_td_waveform
+cpu_td['NR_hdf5_pycbc'] = nr_waveform.get_hplus_hcross_from_get_td_waveform
 cpu_fd = _lalsim_fd_approximants
 
 # Waveforms written in CUDA
