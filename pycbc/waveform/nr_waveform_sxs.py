@@ -31,7 +31,7 @@ import lal
 from pycbc.types import TimeSeries
 from pycbc.pnutils import mtotal_eta_to_mass1_mass2
 
-from . import UseNRinDA
+from . import nr_waveform_utils
 
 MAX_NR_LENGTH = 100000
 
@@ -90,7 +90,7 @@ def get_hplus_hcross_from_sxs(hdf5_file_name, template_params, delta_t,\
       try:
         if verbose: print "\n >>try %d at reading waveform" % idx
         idx += 1
-        nrwav = UseNRinDA.nr_wave(filename=hdf5_file_name, modeLmax=2, \
+        nrwav = nr_waveform_utils.nr_wave(filename=hdf5_file_name, modeLmax=2, \
                     sample_rate=1./delta_t, time_length=estimated_length_pow2, \
                     totalmass=total_mass, inclination=theta, phi=phi, \
                     distance=distance*1e6,\

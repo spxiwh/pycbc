@@ -142,6 +142,7 @@ cpu_sgburst = _lalsim_sgburst_approximants
 
 cpu_td = dict(_lalsim_td_approximants.items())
 cpu_td['NR_hdf5_pycbc'] = nr_waveform.get_hplus_hcross_from_get_td_waveform
+cpu_td['NR_hdf5_pycbc_sxs'] = nr_waveform.get_hplus_hcross_from_get_td_waveform
 cpu_fd = _lalsim_fd_approximants
 
 # Waveforms written in CUDA

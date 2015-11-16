@@ -205,24 +205,28 @@ def get_hplus_hcross_from_get_td_waveform(**p):
     p['end_time'] = 0.
     
     # Re-direct to sxs-format strain reading code
-    fp = h5py.File(p['numrel_data'], 'r')
     # For now, if all groups in the hdf file are directories consider that as
     # sufficient evidence that this is a strain file
-    if numpy.all( ['.dir' in kk for kk in fp] ):
-      hp, hc = nr_waveform_sxs.get_hplus_hcross_from_sxs(p['numrel_data'], p, delta_t)
-      fp.close()
-      return hp, hc
+    if p['approximant'] == 'NR_hdf5_pycbc_sxs':
+        hp, hc = nr_waveform_sxs.get_hplus_hcross_from_sxs(p['numrel_data'], p, delta_t)
+        return hp, hc
+    elif p['approximant'] == 'NR_hdf5_pycbc':
+        #fp = h5py.File(p['numrel_data'], 'r')
+        fp = h5py.File('/home/spxiwh/temp_patricia/config_NRonly_l2m2_0019.h5')
 
-    # Assign correct reference frequency for consistency:
-    Mflower = fp.attrs['f_lower_at_1MSUN']
-    fp.close()
-    mass1 = p['mass1']
-    mass2 = p['mass2']
-    total_mass = mass1 + mass2
-    p['f_ref'] = Mflower / (total_mass)
-    
-    hp, hc = get_hplus_hcross_from_directory(p['numrel_data'], p, delta_t)
-    return hp, hc
+        # Assign correct reference frequency for consistency:
+        Mflower = fp.attrs['f_lower_at_1MSUN']
+        fp.close()
+        mass1 = p['mass1']
+        mass2 = p['mass2']
+        total_mass = mass1 + mass2
+        p['f_ref'] = Mflower / (total_mass)
+
+        hp, hc = get_hplus_hcross_from_directory(p['numrel_data'], p, delta_t)
+        return hp, hc
+    else:
+        err_msg = "Approximant %s not recognized." %(p['approximant'])
+        raise ValueError(err_msg)
 
 def seobnrrom_length_in_time(**kwds):
     """
