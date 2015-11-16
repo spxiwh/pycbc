@@ -211,8 +211,7 @@ def get_hplus_hcross_from_get_td_waveform(**p):
         hp, hc = nr_waveform_sxs.get_hplus_hcross_from_sxs(p['numrel_data'], p, delta_t)
         return hp, hc
     elif p['approximant'] == 'NR_hdf5_pycbc':
-        #fp = h5py.File(p['numrel_data'], 'r')
-        fp = h5py.File('/home/spxiwh/temp_patricia/config_NRonly_l2m2_0019.h5')
+        fp = h5py.File(p['numrel_data'], 'r')
 
         # Assign correct reference frequency for consistency:
         Mflower = fp.attrs['f_lower_at_1MSUN']
