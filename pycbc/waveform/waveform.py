@@ -740,7 +740,39 @@ def get_two_pol_waveform_filter(outplus, outcross, template, **kwargs):
         hc.chirp_length = hp.chirp_length
         hc.length_in_time = hp.length_in_time
         return hp, hc
-
+    elif input_params['approximant'] in td_approximants(_scheme.mgr.state):
+        # N: number of time samples required
+        N = (n-1)*2
+        delta_f = 1.0 / (N * input_params['delta_t'])
+        wav_gen = td_wav[type(_scheme.mgr.state)]
+        hp, hc = wav_gen[input_params['approximant']](**input_params)
+        # taper the time series hp if required
+        if ('taper' in input_params.keys() and \
+            input_params['taper'] is not None):
+            hp = wfutils.taper_timeseries(hp, input_params['taper'],
+                                          return_lal=False)
+            hc = wfutils.taper_timeseries(hc, input_params['taper'],
+                                          return_lal=False)
+        # total duration of the waveform
+        tmplt_length = len(hp) * hp.delta_t
+        # for IMR templates the zero of time is at max amplitude (merger)
+        # thus the start time is minus the duration of the template from
+        # lower frequency cutoff to merger, i.e. minus the 'chirp time'
+        tChirp = - float( hp.start_time )  # conversion from LIGOTimeGPS
+        hp.resize(N)
+        hc.resize(N)
+        k_zero = int(hp.start_time / hp.delta_t)
+        hp.roll(k_zero)
+        hc.roll(k_zero)
+        hp_tilde = FrequencySeries(outplus, delta_f=delta_f, copy=False)
+        hc_tilde = FrequencySeries(outcross, delta_f=delta_f, copy=False)
+        fft(hp.astype(real_same_precision_as(hp_tilde)), hp_tilde)
+        fft(hc.astype(real_same_precision_as(hc_tilde)), hc_tilde)
+        hp_tilde.length_in_time = tmplt_length
+        hp_tilde.chirp_length = tChirp
+        hc_tilde.length_in_time = tmplt_length
+        hc_tilde.chirp_length = tChirp
+        return hp_tilde, hc_tilde
     else:
         raise ValueError("Approximant %s not available" %
                             (input_params['approximant']))

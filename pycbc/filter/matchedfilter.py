@@ -342,9 +342,10 @@ class MatchedFilterSkyMaxControl(object):
         # FIXME: This should live further down
         # Convert output to pycbc TimeSeries
         delta_t = 1.0 / (self.tlen * stilde.delta_f)
+
         snr=TimeSeries(snr, epoch=stilde._epoch, delta_t=delta_t, copy=False)
 
-        idx, snrv = events.threshold(snr[stilde.analyze], self.snr_threshold)
+        idx, snrv = events.threshold_real_numpy(snr[stilde.analyze], self.snr_threshold)
 
         if len(idx) == 0:
             return [], 0, 0, [], [], [], []
@@ -414,6 +415,8 @@ def compute_max_snr_over_sky_loc_stat(hplus, hcross, hphccorr, thresh=0):
         # to 0. hplus = 0 is caught, but resolved by incorrectly setting the
         # det stat to 0. In both cases the statistic is not well defined.
         ratio[numpy.isinf(ratio)] = 0
+        # Maybe 1/0 becomes NAN not inf??
+        ratio[numpy.isnan(ratio)] = 0
     beta = 2 * numpy.real(ratio)
     # FIXME: Replace with abs2 function in numpy ... except that doesn't exist!
     # Using abs**2 will be slow as don't want to do sqrt operation

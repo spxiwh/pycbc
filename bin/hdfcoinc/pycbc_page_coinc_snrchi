@@ -41,12 +41,6 @@ chisq = f['chisq'][:][tid]
 l = chisq == 0
 chisq_dof = f['chisq_dof'][:][tid]
 chisq /= (chisq_dof * 2 - 2)
-cont_chisq = f['cont_chisq'][:][tid]
-cont_chisq_dof = f['cont_chisq_dof'][:][tid]
-cont_chisq /= cont_chisq_dof
-chisq = numpy.maximum(chisq, cont_chisq)
-
-chisq /= (chisq_dof * 2 - 2) 
 chisq[l] = 0.1
 
 fig = pylab.figure()

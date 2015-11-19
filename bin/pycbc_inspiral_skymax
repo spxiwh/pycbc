@@ -91,6 +91,9 @@ opt = parser.parse_args()
 
 # Check that the values returned for the options make sense
 psd.verify_psd_options(opt, parser)
+if opt.fake_strain:
+    opt.frame_files = None
+    opt.frame_cache = None
 strain.verify_strain_options(opt, parser)
 strain.StrainSegments.verify_segment_options(opt, parser)
 scheme.verify_processing_options(opt, parser)

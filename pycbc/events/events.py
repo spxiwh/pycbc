@@ -709,8 +709,6 @@ class EventManagerMultiDet(EventManager):
         self.opt = opt
         self.ifos = ifos
         self.global_params = kwargs
-        if psd is not None:
-            self.global_params['psd'] = psd[ifos[0]]
 
         # The events array does not like holding the ifo as string,
         # so create a mapping dict and hold as an int
@@ -996,6 +994,6 @@ class EventManagerMultiDet(EventManager):
 
 __all__ = ['threshold_and_cluster', 'newsnr', 'effsnr',
            'findchirp_cluster_over_window',
-           'threshold', 'cluster_reduce',
+           'threshold', 'threshold_real_numpy', 'cluster_reduce',
            'cohptf_cluster_over_window',
            'EventManager', 'EventManagerMultiDet']

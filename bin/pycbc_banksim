@@ -131,6 +131,9 @@ def get_waveform(approximant, phase_order, amplitude_order, spin_order,
         else:
             # FIXME: Hacked the alpha columns to hold sky location/orientation
             # params, as sngl_inspiral has no appropriate columns
+            if approximant == 'SpinTaylorF2':
+                if not (template_params.spin2z == 0):
+                    approximant = 'TaylorF2'
             hp, hc = get_fd_waveform(template_params, approximant=approximant,
                                  phase_order=phase_order, delta_f=delta_f,
                                  spin_order=spin_order,

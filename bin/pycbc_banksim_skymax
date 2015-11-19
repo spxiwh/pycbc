@@ -46,6 +46,7 @@ from pycbc.filter import overlap_cplx, matched_filter
 from pycbc.filter import compute_max_snr_over_sky_loc_stat
 from pycbc.fft import fft
 from math import cos, sin, ceil, log
+import lal
 import pycbc.psd, pycbc.scheme, pycbc.fft
 
 
@@ -132,6 +133,9 @@ def get_waveform(approximant, phase_order, amplitude_order, spin_order,
         else:
             # FIXME: Hacked the alpha columns to hold sky location/orientation
             # params, as sngl_inspiral has no appropriate columns
+            if approximant == 'SpinTaylorF2':
+                if not (template_params.spin2z == 0): 
+                    approximant = 'TaylorF2'
             hp, hc = get_fd_waveform(template_params, approximant=approximant,
                                  phase_order=phase_order, delta_f=delta_f,
                                  spin_order=spin_order, f_ref = 40,
@@ -145,6 +149,8 @@ def get_waveform(approximant, phase_order, amplitude_order, spin_order,
                 hvec = f_plus * hp + f_cross * hc
 
     elif approximant in td_approximants():
+        if approximant == 'SpinTaylorT2':
+            template_params.f_final = 6**-1.5 / (lal.PI * (template_params.mass1 + template_params.mass2) * lal.MTSUN_SI)
         if hasattr(template_params, 'latitude'):
             hp, hc = get_td_waveform(template_params,
                                         approximant=approximant,

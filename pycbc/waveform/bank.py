@@ -136,9 +136,13 @@ class FilterBank(object):
         if hasattr(htilde, 'length_in_time'):
             if htilde.length_in_time is not None:
                 self.table[index].ttotal = htilde.length_in_time
+        elif not self.table[index].ttotal:
+            self.table[index].ttotal = 0.
         if hasattr(htilde, 'chirp_length'):
             if htilde.chirp_length is not None:
                 self.table[index].template_duration = htilde.chirp_length
+        elif not self.table[index].template_duration:
+            self.table[index].template_duration = 0.
 
         htilde = htilde.astype(self.dtype)
         htilde.f_lower = self.f_lower
@@ -203,12 +207,15 @@ class FilterBankSkyMax(FilterBank):
         # erased by the type conversion below
         length_in_time = None
         chirp_length = None
-        if hasattr(hplus, 'length_in_time'):
-            length_in_time = hplus.length_in_time
-            self.table[index].ttotal = length_in_time
-        if hasattr(hplus, 'chirp_length'):
-            chirp_length = hplus.chirp_length
-            self.table[index].template_duration = chirp_length
+        if hasattr(hplus, 'length_in_time') and \
+                                              hplus.length_in_time is not None:
+            self.table[index].ttotal = hplus.length_in_time
+        elif not self.table[index].ttotal:
+            self.table[index].ttotal = 0.
+        if hasattr(hplus, 'chirp_length') and hplus.chirp_length is not None:
+            self.table[index].template_duration = hplus.chirp_length
+        elif not self.table[index].template_duration:
+            self.table[index].template_duration = 0.
 
         hplus = hplus.astype(self.dtype)
         hcross = hcross.astype(self.dtype)

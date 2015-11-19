@@ -26,10 +26,6 @@ l = chisq == 0
 chisq_dof = f['chisq_dof'][:]
 chisq /= (chisq_dof * 2 - 2)
 chisq[l] = .1
-cont_chisq = f['cont_chisq'][:]
-cont_chisq_dof = f['cont_chisq_dof'][:]
-cont_chisq /= cont_chisq_dof
-chisq = numpy.maximum(chisq, cont_chisq)
 
 def snr_from_chisq(chisq, newsnr, q=6.):
     snr = numpy.zeros(len(chisq)) + float(newsnr)
@@ -59,10 +55,10 @@ for i, cval in enumerate(args.newsnr_contours):
         label = "$\\hat{\\rho} = %s$" % cval
     else:
         label = "$%s$" % cval
-    label_pos_idx = numpy.where(snrv > snr.max() * 0.8)[0][0]
-    pylab.text(snrv[label_pos_idx], r[label_pos_idx], label, fontsize=6,
-               horizontalalignment='center', verticalalignment='center',
-               bbox=dict(facecolor='white', lw=0, pad=0, alpha=0.9))
+    #label_pos_idx = numpy.where(snrv > snr.max() * 0.8)[0][0]
+    #pylab.text(snrv[label_pos_idx], r[label_pos_idx], label, fontsize=6,
+    #           horizontalalignment='center', verticalalignment='center',
+    #           bbox=dict(facecolor='white', lw=0, pad=0, alpha=0.9))
 
 pylab.hexbin(snr, chisq, gridsize=300, xscale='log', yscale='log', lw=0.04,
              mincnt=1, norm=matplotlib.colors.LogNorm())
