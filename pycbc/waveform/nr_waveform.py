@@ -43,11 +43,99 @@ def get_data_from_h5_file(filepointer, time_series, key_name):
     knots = filepointer[key_name]['knots'][:]
     data = filepointer[key_name]['data'][:]
     # Check time_series is valid
-    assert(knots[0] <= time_series[0])
-    assert(knots[-1] >= time_series[-1])
+    if knots[0] < 0:
+        assert(knots[0]*1.00001 <= time_series[0])
+    else:
+        assert(knots[0] <= time_series[0]*1.00001)
+    if knots[-1] < 0:
+        assert(knots[-1] >= time_series[-1]*1.00001)
+    else:
+        assert(knots[-1]*1.00001 >= time_series[-1])
     spline = UnivariateSpline(knots, data, k=deg, s=0)
     out = spline(time_series, 0)
     return out
+
+def get_rotation_angles_from_h5_file(filepointer, inclination, phi_ref):
+    """
+    Computes the angles necessary to rotate from the intrinsic NR source frame
+    into the LAL frame. See DCC-T1600045 for details.
+    Yes, it would be better to make this class-based, however as this has to
+    be coded in C it is easier to keep a C-style to make later porting easier.
+    """
+    cos = numpy.cos
+    sin = numpy.sin
+    # Following section IV of DCC-T1600045
+    # Step 1: Define Phi = phiref/2 ... I'm ignoring this, I think it is wrong
+    orb_phase = phi_ref
+
+    # Step 2: Compute Zref
+    # 2.1: Compute LN_hat from file. LN_hat = direction of orbital ang. mom.
+    ln_hat_x = filepointer.attrs['LNhatx']
+    ln_hat_y = filepointer.attrs['LNhaty']
+    ln_hat_z = filepointer.attrs['LNhatz']
+    ln_hat = numpy.array([ln_hat_x, ln_hat_y, ln_hat_z])
+    ln_hat = ln_hat / sum(ln_hat * ln_hat)**0.5
+
+    # 2.2: Compute n_hat from file. n_hat = direction from object 2 to object 1
+    n_hat_x = filepointer.attrs['nhatx']
+    n_hat_y = filepointer.attrs['nhaty']
+    n_hat_z = filepointer.attrs['nhatz']
+    n_hat = numpy.array([n_hat_x, n_hat_y, n_hat_z])
+    n_hat = n_hat / sum(n_hat*n_hat)**0.5
+
+    # 2.3: Compute Z in the lal wave frame
+    corb_phase = cos(orb_phase)
+    sorb_phase = sin(orb_phase)
+    sinclination = sin(inclination)
+    cinclination = cos(inclination)
+    ln_cross_n = numpy.cross(ln_hat, n_hat)
+    z_wave = sinclination * (sorb_phase * n_hat + corb_phase * ln_cross_n)
+    z_wave += cinclination * ln_hat
+
+    # Step 3.1: Extract theta and psi from Z in the lal wave frame
+    # NOTE: Theta can only run between 0 and pi, so no problem with arccos here
+    theta = numpy.arccos(z_wave[2])
+    # Degenerate if Z_wave[2] == 1. In this case just choose psi randomly,
+    # the choice will be cancelled out by alpha correction (I hope!)
+    if abs(z_wave[2] - 1 ) < 0.000001:
+        psi = 0.5
+    else:
+        # psi can run between 0 and 2pi, but only one solution works for x and y
+        psi = numpy.arccos(z_wave[0] / sin(theta))
+        y_val = sin(psi) * sin(theta)
+        # Is the sign wrong?
+        if y_val + z_wave[1] < 0.0001:
+            psi = 2 * numpy.pi - psi
+            y_val = sin(psi) * sin(theta)
+        if y_val - z_wave[1] > 0.0001:
+            err_msg = "Something's wrong in Ian's math. Tell him he's an idiot!"
+            raise ValueError(err_msg)
+
+    # 3.2: Compute the vectors theta_hat and psi_hat
+    stheta = sin(theta)
+    ctheta = cos(theta)
+    spsi = sin(psi)
+    cpsi = cos(psi)
+    theta_hat = numpy.array([cpsi * ctheta, spsi * ctheta, - stheta])
+    psi_hat = numpy.array([-spsi, cpsi, 0])
+
+    # Step 4: Compute sin(alpha) and cos(alpha)
+    n_dot_theta = numpy.dot(n_hat, theta_hat)
+    ln_cross_n_dot_theta = numpy.dot(ln_cross_n, theta_hat)
+    n_dot_psi = numpy.dot(n_hat, psi_hat)
+    ln_cross_n_dot_psi = numpy.dot(ln_cross_n, psi_hat)
+
+    calpha = corb_phase * n_dot_theta - sorb_phase * ln_cross_n_dot_theta
+    salpha = corb_phase * n_dot_psi - sorb_phase * ln_cross_n_dot_psi
+
+    # Step X: Also useful to keep the source frame vectors as defined in
+    #         equation 16 of Harald's document.
+    x_source_hat = corb_phase * n_hat - sorb_phase * ln_cross_n
+    y_source_hat = sorb_phase * n_hat + corb_phase * ln_cross_n
+    z_source_hat = ln_hat
+    source_vecs = [x_source_hat, y_source_hat, z_source_hat]
+
+    return theta, psi, calpha, salpha, source_vecs
 
 def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     """
@@ -68,63 +156,66 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
                 if value in ['spin1x', 'spin1y','spin1z', 'spin2x', 'spin2y', 'spin2']:
                     # Spins are not provided, default to 0
                     return 0.0
-            
+
     mass1 = get_param('mass1')
     mass2 = get_param('mass2')
     total_mass = mass1 + mass2
-    
+
     spin1z = get_param('spin1z')
     spin2z = get_param('spin2z')
-    
+
     spin1x = get_param('spin1x')
     spin2x = get_param('spin2x')
-    
+
     spin1y = get_param('spin1y')
     spin2y = get_param('spin2y')
-    
+
     flower = get_param('f_lower')
-    theta = get_param('inclination') # Is it???
-    
-    phi = get_param('coa_phase')
-    
+    inclination = get_param('inclination')
+    phi_ref = get_param('coa_phase')
+
     end_time = get_param('end_time')
     distance = get_param('distance')
-    
+
     # Open NR file:
     fp = h5py.File(hd5_file_name, 'r')
-    # Add on intrinsic phase to provided phi
-    phi += fp.attrs['coa_phase']
-    
+
     # Reference frequency:
-    #FIXME: Does this mess up xml tables?
     if 'f_ref' in template_params:
+        # FIXME: If f_ref is given, this should check it is correct!
         template_params['f_ref'] = fp.attrs['f_lower_at_1MSUN'] / total_mass
-    else: template_params['f_ref'] = fp.attrs['f_lower_at_1MSUN'] / total_mass
+    else:
+        template_params['f_ref'] = fp.attrs['f_lower_at_1MSUN'] / total_mass
     f_ref = get_param('f_ref')
 
+    # Identify rotation parameters. In theory this can be a function of f_ref,
+    # but not yet.
+    theta, psi, calpha, salpha, source_vecs = \
+                  get_rotation_angles_from_h5_file(fp, inclination, phi_ref)
+
     # Sanity checking: make sure intrinsic template parameters are consistent
-    # with the NR metadata.    
+    # with the NR metadata.
     # FIXME: Add more checks!
-    
+
     # Add check that mass ratio is consistent
     eta = fp.attrs['eta']
     if abs(((mass1 * mass2) / (mass1 + mass2)**2) - eta) > 10**(-3):
         err_msg = "MASSES ARE INCONSISTENT WITH THE MASS RATIO OF THE NR SIMULATION."
         raise ValueError(err_msg)
-        
+
     # Add check that spins are consistent
-    if (abs(spin1x - fp.attrs['spin1x']) > 10**(-3) or \
-        abs(spin1y - fp.attrs['spin1y']) > 10**(-3) or \
-        abs(spin1z - fp.attrs['spin1z']) > 10**(-3) ):
-        err_msg = "COMPONENTS OF SPIN1 ARE INCONSISTENT WITH THE NR SIMULATION."
-        raise ValueError(err_msg)
-    
-    if (abs(spin2x - fp.attrs['spin2x']) > 10**(-3) or \
-        abs(spin2y - fp.attrs['spin2y']) > 10**(-3) or \
-        abs(spin2z - fp.attrs['spin2z']) > 10**(-3) ):
-        err_msg = "COMPONENTS OF SPIN2 ARE INCONSISTENT WITH THE NR SIMULATION."
-        raise ValueError(err_msg)
-    
+    #if (abs(spin1x - fp.attrs['spin1x']) > 10**(-3) or \
+    #    abs(spin1y - fp.attrs['spin1y']) > 10**(-3) or \
+    #    abs(spin1z - fp.attrs['spin1z']) > 10**(-3) ):
+    #    err_msg = "COMPONENTS OF SPIN1 ARE INCONSISTENT WITH THE NR SIMULATION."
+    #    raise ValueError(err_msg)
+
+    #if (abs(spin2x - fp.attrs['spin2x']) > 10**(-3) or \
+    #    abs(spin2y - fp.attrs['spin2y']) > 10**(-3) or \
+    #    abs(spin2z - fp.attrs['spin2z']) > 10**(-3) ):
+    #    err_msg = "COMPONENTS OF SPIN2 ARE INCONSISTENT WITH THE NR SIMULATION."
+    #    raise ValueError(err_msg)
+
     # First figure out time series that is needed.
     # Demand that 22 mode that is present and use that
     Mflower = fp.attrs['f_lower_at_1MSUN']
@@ -172,17 +263,24 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
             curr_phase = get_data_from_h5_file(fp, time_series_M, phase_key)
             curr_h_real = curr_amp * numpy.cos(curr_phase)
             curr_h_imag = curr_amp * numpy.sin(curr_phase)
-            curr_ylm = lal.SpinWeightedSphericalHarmonic(theta, phi, -2, l, m)
-            hp += curr_h_real * curr_ylm.real + curr_h_imag * curr_ylm.imag
-            # FIXME: No idea whether these should be minus or plus, guessing
-            #        minus for now. Only affects some polarization phase
-            hc += + curr_h_real * curr_ylm.imag - curr_h_imag * curr_ylm.real 
+            curr_ylm = lal.SpinWeightedSphericalHarmonic(theta, psi, -2, l, m)
+            # Here is what 0709.0093 defines h_+ and h_x as. This defines the
+            # NR wave frame
+            curr_hp = curr_h_real * curr_ylm.real - curr_h_imag * curr_ylm.imag
+            curr_hc = -curr_h_real*curr_ylm.imag - curr_h_imag * curr_ylm.real
+
+            # Correct for the "alpha" angle as given in T1600045 to translate
+            # from the NR wave frame to LAL wave-frame
+            hp_corr = (calpha*calpha - salpha*salpha) * curr_hp
+            hp_corr += 2 * calpha * salpha * curr_hc
+            hc_corr = - 2 * calpha * salpha * curr_hp
+            hc_corr += (calpha*calpha - salpha*salpha) * curr_hc
+            hp += hp_corr
+            hc += hc_corr
 
     # Scale by distance
-    # FIXME: The original NR scaling is 1M. The steps below scale the distance
-    #        appropriately given a total mass M. The distance is now in Mpc. 
-    #        Is this the correct unit?
-    #       .
+    # The original NR scaling is 1M. The steps below scale the distance
+    # appropriately given a total mass M. The distance is now in Mpc.
     massMpc = total_mass * lal.MRSUN_SI / ( lal.PC_SI * 1.0e6)
     hp *= (massMpc/distance)
     hc *= (massMpc/distance)
@@ -203,7 +301,7 @@ def get_hplus_hcross_from_get_td_waveform(**p):
     """
     delta_t = float(p['delta_t'])
     p['end_time'] = 0.
-    
+
     # Re-direct to sxs-format strain reading code
     # For now, if all groups in the hdf file are directories consider that as
     # sufficient evidence that this is a strain file
@@ -241,6 +339,5 @@ def seobnrrom_length_in_time(**kwds):
     time_length = lalsimulation.SimIMRSEOBNRv2ChirpTimeSingleSpin(
                                mass1*lal.MSUN_SI, mass2*lal.MSUN_SI, chi, fmin)
     # FIXME: This is still approximate so add a 10% error margin
-    # FIXME: issues with 10% error margin
     time_length = 1.1 * time_length
     return time_length
