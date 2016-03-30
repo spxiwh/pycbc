@@ -26,6 +26,7 @@ import h5py
 import argparse
 import numpy
 from numpy import cos, sin
+import distutils
 
 import pycbc.version
 import pycbc.psd
@@ -212,4 +213,7 @@ for total_mass in mass_range:
                 output_data.append(data)
 
 output_data = numpy.array(output_data)
-numpy.savetxt(opts.output_file, output_data, header="Total mass, Inclination, Phi, Polarization, SNR all modes, SNR l=2 modes, SNR l=3 modes, SNR l=4 modes, SNR l=5 modes, SNR 22 mode, SNR 21 mode, SNR 33 mode, SNR 44 mode, SNR 55 mode")
+if distutils.version.LooseVersion(numpy.version.version) >= distutils.version.LooseVersion('1.7.0'):
+    numpy.savetxt(opts.output_file, output_data, header="Total mass, Inclination, Phi, Polarization, SNR all modes, SNR l=2 modes, SNR l=3 modes, SNR l=4 modes, SNR l=5 modes, SNR 22 mode, SNR 21 mode, SNR 33 mode, SNR 44 mode, SNR 55 mode")
+else:
+    numpy.savetxt(opts.output_file, output_data)
