@@ -447,6 +447,7 @@ setup (
                'bin/hdfcoinc/pycbc_plot_bank_bins',
                'bin/pygrb/pygrb_make_offline_workflow',
                'bin/pygrb/pygrb_make_summary_page',
+               'bin/numrel/pycbc_measure_nr_mode_power',
                ],
     packages = [
                'pycbc',
