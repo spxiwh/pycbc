@@ -137,10 +137,31 @@ def get_rotation_angles_from_h5_file(filepointer, inclination, phi_ref):
 
     return theta, psi, calpha, salpha, source_vecs
 
-def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
+def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t,
+                                    limit_modes=None, cplx_mode_dict=None):
     """
     Generate hplus, hcross from a NR hd5 file, for a given total mass and
     f_lower.
+
+    Parameters
+    -----------
+    hd5_file_name : string
+        Filename of the HDF5 file containing compressed NR data.
+    template_params : dict or namespace
+        Object containing values corresponding to the parameters of the
+        waveform to be generated.
+    delta_t : float
+        Timestep to generate waveform at.
+    limit_modes : list of tuples, default=None
+        If given (ie. not None) this should be a list of tuples ((2,2), (2,1))
+        containing a list of (l,m) modes to generate the waveform with.
+    cplx_mode_dict : dictionary
+        **WARNING: DO NOT USE THIS UNLESS YOU REALLY UNDERSTAND WHAT IT DOES!**
+        If this option is given the Ylm time series will be stored in this
+        dictionary if they do not already exist. If a mode is in the dictionary
+        it will be used directly. This can be used if generating a NR waveform
+        numerous times with the same total mass but different inclination and
+        phi values.
     """
     def get_param(value):
         try:
@@ -248,35 +269,47 @@ def get_hplus_hcross_from_directory(hd5_file_name, template_params, delta_t):
     hp = numpy.zeros(len(time_series), dtype=float)
     hc = numpy.zeros(len(time_series), dtype=float)
 
+    # Identify which modes are needed.
+    if limit_modes is None:
+        mode_list = []
+        # NOTE: Currently will only search up to l=8 by default.
+        for l in (2,3,4,5,6,7,8):
+            for m in range(-l,l+1):
+                mode_list.append((l,m))
+    else:
+        mode_list = limit_modes
+
     # Generate the waveform
-    # FIXME: should parse list of (l,m)-pairs
-    #   IWH: Code currently checks for existence of all modes, and includes a
-    #        mode if it is present is this not the right behaviour? If not,
-    #        what is?
-    for l in (2,3,4,5,6,7,8):
-        for m in range(-l,l+1):
-            amp_key = 'amp_l%d_m%d' %(l,m)
-            phase_key = 'phase_l%d_m%d' %(l,m)
-            if amp_key not in fp.keys() or phase_key not in fp.keys():
-                continue
+    for l,m in mode_list:
+        amp_key = 'amp_l%d_m%d' %(l,m)
+        phase_key = 'phase_l%d_m%d' %(l,m)
+        if amp_key not in fp.keys() or phase_key not in fp.keys():
+            continue
+        if cplx_mode_dict is not None and \
+              amp_key in cplx_mode_dict:
+            curr_h_real, curr_h_imag = cplx_mode_dict[amp_key]
+        else:
             curr_amp = get_data_from_h5_file(fp, time_series_M, amp_key)
             curr_phase = get_data_from_h5_file(fp, time_series_M, phase_key)
             curr_h_real = curr_amp * numpy.cos(curr_phase)
             curr_h_imag = curr_amp * numpy.sin(curr_phase)
-            curr_ylm = lal.SpinWeightedSphericalHarmonic(theta, psi, -2, l, m)
-            # Here is what 0709.0093 defines h_+ and h_x as. This defines the
-            # NR wave frame
-            curr_hp = curr_h_real * curr_ylm.real - curr_h_imag * curr_ylm.imag
-            curr_hc = -curr_h_real*curr_ylm.imag - curr_h_imag * curr_ylm.real
+            if cplx_mode_dict is not None:
+                cplx_mode_dict[amp_key] = (curr_h_real, curr_h_imag)
 
-            # Correct for the "alpha" angle as given in T1600045 to translate
-            # from the NR wave frame to LAL wave-frame
-            hp_corr = (calpha*calpha - salpha*salpha) * curr_hp
-            hp_corr += 2 * calpha * salpha * curr_hc
-            hc_corr = - 2 * calpha * salpha * curr_hp
-            hc_corr += (calpha*calpha - salpha*salpha) * curr_hc
-            hp += hp_corr
-            hc += hc_corr
+        curr_ylm = lal.SpinWeightedSphericalHarmonic(theta, psi, -2, l, m)
+        # Here is what 0709.0093 defines h_+ and h_x as. This defines the
+        # NR wave frame
+        curr_hp = curr_h_real * curr_ylm.real - curr_h_imag * curr_ylm.imag
+        curr_hc = -curr_h_real*curr_ylm.imag - curr_h_imag * curr_ylm.real
+
+        # Correct for the "alpha" angle as given in T1600045 to translate
+        # from the NR wave frame to LAL wave-frame
+        hp_corr = (calpha*calpha - salpha*salpha) * curr_hp
+        hp_corr += 2 * calpha * salpha * curr_hc
+        hc_corr = - 2 * calpha * salpha * curr_hp
+        hc_corr += (calpha*calpha - salpha*salpha) * curr_hc
+        hp += hp_corr
+        hc += hc_corr
 
     # Scale by distance
     # The original NR scaling is 1M. The steps below scale the distance
