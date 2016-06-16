@@ -101,13 +101,26 @@ def get_rotation_angles_from_h5_file(filepointer, inclination, phi_ref):
         psi = 0.5
     else:
         # psi can run between 0 and 2pi, but only one solution works for x and y
-        psi = numpy.arccos(z_wave[0] / sin(theta))
+
+        # Possible numerical issues if z_wave[0] = sin(theta)
+        if abs(z_wave[0] / sin(theta)) > 1:
+            if abs(z_wave[0] / sin(theta)) < 1.00001:
+                if (z_wave[0] * sin(theta)) < 0.:
+                    psi = numpy.pi
+                else:
+                    psi = 0.
+            else:
+                err_msg = "Something's bad in Ian's math. Tell him he's an idiot!"
+                raise ValueError(err_msg)
+        else:
+            psi = numpy.arccos(z_wave[0] / sin(theta))
         y_val = sin(psi) * sin(theta)
-        # Is the sign wrong?
-        if y_val + z_wave[1] < 0.0001:
+        # If z_wave[1] is negative, flip psi so that sin(psi) goes negative
+        # while preserving cos(psi)
+        if z_wave[1] < 0.:
             psi = 2 * numpy.pi - psi
             y_val = sin(psi) * sin(theta)
-        if y_val - z_wave[1] > 0.0001:
+        if abs(y_val - z_wave[1]) > 0.0001:
             err_msg = "Something's wrong in Ian's math. Tell him he's an idiot!"
             raise ValueError(err_msg)
 
