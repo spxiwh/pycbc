@@ -1,9 +1,0 @@
-doc-warnings: true
-test-warnings: no
-strictness: medium
-autodetect: yes
-ignore-patterns:
-    - examples/*
-    - test/*
-    - docs/*
-    - tools/*
