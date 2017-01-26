@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright (C) 2015 Patricia Schmidt, Ian W. Harry
+# Copyright (C) 2015/2017 Patricia Schmidt, Ian W. Harry
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
@@ -17,13 +17,16 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 """
-This program construct an NR waveform catalog in xml format by reading the relevant NR metadata from the HDF5 file. It also holds the pointers to the NR data directories. Any catalog generated that way can directly be used by lalapps_inspinj.
+This program constructs an NR waveform catalog in xml format by reading the relevant NR metadata from the HDF5 file. 
+It also holds the pointers to the NR data directories. Any catalog generated that way can directly be used by 
+lalapps_inspinj.
 """
 
 import sys, argparse
 
 import h5py
 import lal
+from lalsimulation import SimInspiralNRWaveformGetSpinsFromHDF5File
 
 from glue.ligolw import ligolw
 from glue.ligolw import table
@@ -32,13 +35,13 @@ from glue.ligolw import ilwd
 from glue.ligolw import utils
 from glue.ligolw.utils import process as ligolw_process
 
-import pycbc.version
+#import pycbc.version
 
-__author__  = "Patricia Schmidt <patricia.schmidt@ligo.org>, "
-__author__  += "Ian Harry <ian.harry@ligo.org>"
-__version__ = pycbc.version.git_verbose_msg
-__date__    = pycbc.version.date
-__program__ = "pycbc_make_nr_hdf_catalog"
+#__author__  = "Patricia Schmidt <patricia.schmidt@ligo.org>, "
+#__author__  += "Ian Harry <ian.harry@ligo.org>"
+#__version__ = pycbc.version.git_verbose_msg
+#__date__    = pycbc.version.date
+#__program__ = "pycbc_make_nr_hdf_catalog"
 
 
 cols = lsctables.SimInspiralTable.validcolumns
@@ -69,21 +72,7 @@ parser.add_argument("-o", "--output-file", action="store", type=str,
                     required=True, help="Output file name")
 parser.add_argument("-i", "--input-files", nargs= '*', dest='inputs',
                     action="store", type=str, required=True,
-                    help="Path to HDF5 input files")
-# FIXME: Examples, delete later
-#parser.add_argument("-m", "--min-match", action="store", type=float,
-#                    default=None, help=
-#                    "Generate bank with specified minimum match.  REQUIRED.")
-#parser.add_argument("--random-seed", action="store", type=int,
-#                    default=None,
-#                    help="""Random seed to use when calling numpy.random
-#                            functions used in obtaining the principal 
-#                            components and when translating points back to 
-#                            physical space.  
-#                            If given, the code should give the same output 
-#                            when run with the same random seed.""")
-#parser.add_argument("-O", "--output-file",
-#                    help="Output file name.  REQUIRED.")
+                    help="Path(s) to HDF5 input files")
 
 args = parser.parse_args()
 
@@ -91,10 +80,14 @@ args = parser.parse_args()
 xmldoc = ligolw.Document()
 xmldoc.appendChild(ligolw.LIGO_LW())
 
+# FIXME: PyCBC specific. See changes below
+#proc_id = ligolw_process.register_to_xmldoc(xmldoc, "nr_catalog",
+#                    args.__dict__, comment="", version=pycbc.version.git_hash,
+#                    cvs_repository='pycbc/' + pycbc.version.git_branch,
+#                    cvs_entry_time=pycbc.version.date).process_id
+
 proc_id = ligolw_process.register_to_xmldoc(xmldoc, "nr_catalog",
-                    args.__dict__, comment="", version=pycbc.version.git_hash,
-                    cvs_repository='pycbc/' + pycbc.version.git_branch,
-                    cvs_entry_time=pycbc.version.date).process_id
+                    args.__dict__, comment="").process_id
 
 sim_table = lsctables.New(lsctables.SimInspiralTable)
 
@@ -111,24 +104,27 @@ for count, inj in enumerate(inj_list):
     curr_sim.simulation_id = ilwd.ilwdchar("sim_inspiral:simulation_id:%d"\
                                            %(count))
     curr_sim.numrel_data = inj
-    # FIXME: Patricia fix!
-    f = h5py.File(inj, 'r')    #Is this the correct index?
+    f = h5py.File(inj, 'r')  
     curr_sim.eta = f.attrs['eta']
     if curr_sim.eta > 0.25 and curr_sim.eta < 0.2501:
         curr_sim.eta = 0.25
-    curr_sim.spin1x = f.attrs['spin1x']
-    curr_sim.spin1y = f.attrs['spin1y']
-    curr_sim.spin1z = f.attrs['spin1z']
-    curr_sim.spin2x = f.attrs['spin2x']
-    curr_sim.spin2y = f.attrs['spin2y']
-    curr_sim.spin2z = f.attrs['spin2z']
+    # Populate spins columns with spins in LAL frame! Need to be
+    # transformed from NR frame
+    spins = SimInspiralNRWaveformGetSpinsFromHDF5File(inj)
+    curr_sim.spin1x = spins[0]
+    curr_sim.spin1y = spins[1]
+    curr_sim.spin1z = spins[2]
+    curr_sim.spin2x = spins[3]
+    curr_sim.spin2y = spins[4]
+    curr_sim.spin2z = spins[5]
 
     # FIXME: Do we need these?
+    # I think f_lower not understood at the moment
     curr_sim.f_lower = f.attrs['f_lower_at_1MSUN'] * lal.TWOPI * lal.MTSUN_SI
     f.close()
     #print curr_sim.f_lower
-    curr_sim.numrel_mode_max = 0
-    curr_sim.numrel_mode_min = 0
+    #curr_sim.numrel_mode_max = 0
+    #curr_sim.numrel_mode_min = 0
     
     sim_table.append(curr_sim)
 
