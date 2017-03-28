@@ -184,6 +184,9 @@ elif options.output_file.endswith(('.h5','.hdf','.hdf5')):
     out_fp['mass2'] = temp_bank[:,1]
     out_fp['spin1z'] = temp_bank[:,2]
     out_fp['spin2z'] = temp_bank[:,3]
+    out_fp['template_hash'] = [hash((m1, m2, s1z, s2z)) for m1, m2, s1z, s2z in
+                               zip(temp_bank[:,0], temp_bank[:,1],
+                                   temp_bank[:,2], temp_bank[:,3])]
     out_fp['f_lower'] = [options.f_low] * len(temp_bank[:,0])
     tmplt_durations = []
     for i in xrange(len(temp_bank[:,0])):
