@@ -254,23 +254,23 @@ cuda_fd = dict(_lalsim_fd_approximants.items() + _cuda_fd_approximants.items())
 def print_td_approximants():
     print("LalSimulation Approximants")
     for approx in _lalsim_td_approximants.keys():
-        print "  " + approx
+        print("  " + approx)
     print("CUDA Approximants")
     for approx in _cuda_td_approximants.keys():
-        print "  " + approx
+        print("  " + approx)
 
 def print_fd_approximants():
     print("LalSimulation Approximants")
     for approx in _lalsim_fd_approximants.keys():
-        print "  " + approx
+        print("  " + approx)
     print("CUDA Approximants")
     for approx in _cuda_fd_approximants.keys():
-        print "  " + approx
+        print("  " + approx)
 
 def print_sgburst_approximants():
     print("LalSimulation Approximants")
     for approx in _lalsim_sgburst_approximants.keys():
-        print "  " + approx
+        print("  " + approx)
 
 def td_approximants(scheme=_scheme.mgr.state):
     """Return a list containing the available time domain approximants for
@@ -312,6 +312,8 @@ def get_obj_attrs(obj):
             for slot in obj.__slots__:
                 if hasattr(obj, slot):
                     pr[slot] = getattr(obj, slot)
+        elif isinstance(obj, dict):
+            pr = obj.copy()
         else:
             for name in dir(obj):
                 try:
@@ -663,6 +665,7 @@ _filter_time_lengths["SEOBNRv1_ROM_EffectiveSpin"] = seobnrv2_length_in_time
 _filter_time_lengths["SEOBNRv1_ROM_DoubleSpin"] = seobnrv2_length_in_time
 _filter_time_lengths["SEOBNRv2_ROM_EffectiveSpin"] = seobnrv2_length_in_time
 _filter_time_lengths["SEOBNRv2_ROM_DoubleSpin"] = seobnrv2_length_in_time
+_filter_time_lengths["EOBNRv2HM_ROM"] = seobnrv2_length_in_time
 _filter_time_lengths["SEOBNRv2_ROM_DoubleSpin_HI"] = seobnrv2_length_in_time
 _filter_time_lengths["SEOBNRv4_ROM"] = seobnrv4_length_in_time
 _filter_time_lengths["IMRPhenomC"] = imrphenomd_length_in_time

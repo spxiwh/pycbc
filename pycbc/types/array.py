@@ -47,7 +47,10 @@ from pycbc.types.aligned import ArrayWithAligned
 # array of uint32 integers
 _ALLOWED_DTYPES = [_numpy.float32, _numpy.float64, _numpy.complex64,
                    _numpy.complex128, _numpy.uint32, _numpy.int32, _numpy.int]
-_ALLOWED_SCALARS = [int, long, float, complex] + _ALLOWED_DTYPES
+try:
+    _ALLOWED_SCALARS = [int, long, float, complex] + _ALLOWED_DTYPES
+except NameError:
+    _ALLOWED_SCALARS = [int, float, complex] + _ALLOWED_DTYPES
 
 def _convert_to_scheme(ary):
     if not isinstance(ary._scheme, _scheme.mgr.state.__class__):
@@ -727,11 +730,6 @@ class Array(object):
     def resize(self, new_size):
         """Resize self to new_size
         """
-        if (new_size < len(self)):
-            logging.warn("Requested size (%s) of array is less than "
-                         "current size (%s). This will truncate "
-                         "the array." % (new_size, len(self)))
-        
         if new_size == len(self):
             return
         else:
