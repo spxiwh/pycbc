@@ -34,7 +34,7 @@ import numpy
 # Used to manage a likelihood instance across multiple cores or MPI
 _global_instance = None
 def _call_global_likelihood(*args, **kwds):
-    return _global_instance(*args, **kwds)
+    return _global_instance(*args, **kwds) # pylint:disable=not-callable
 
 class _NoPrior(object):
     """Dummy class to just return 0 if no prior is provided in a
@@ -528,7 +528,7 @@ class GaussianLikelihood(_BaseLikelihoodEvaluator):
 
         Returns
         -------
-        float
+        numpy.float64
             The value of the log likelihood ratio evaluated at the given point.
         """
         lr = 0.
@@ -552,7 +552,7 @@ class GaussianLikelihood(_BaseLikelihoodEvaluator):
                 # - <h, h>/2.
                 - 0.5*h[self._kmin:kmax].inner(h[self._kmin:kmax]).real
                 )
-        return lr
+        return numpy.float64(lr)
 
     def loglikelihood(self, params):
         r"""Computes the log likelihood of the paramaters,
