@@ -17,7 +17,10 @@ This modules provides classes for evaluating distributions with bounds.
 """
 
 import warnings
-from ConfigParser import Error
+try:
+    from ConfigParser import Error
+except ImportError:
+    from configparser import Error
 from pycbc.distributions import boundaries
 
 VARARGS_DELIM = '+'
@@ -330,7 +333,7 @@ class BoundedDist(object):
         Returns
         -------
         BoundedDist
-            A distribution instance from the pycbc.inference.prior module.
+            A distribution instance from the pycbc.distribution subpackage.
         """
         return bounded_from_config(cls, cp, section, variable_args,
                                     bounds_required=bounds_required)

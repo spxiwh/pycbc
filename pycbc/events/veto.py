@@ -1,9 +1,8 @@
 """ This module contains utilities to manipulate trigger lists based on 
 segment.
 """
-import numpy, urlparse, os.path
-import lal
-from pycbc_glue.ligolw import ligolw, table, lsctables, utils as ligolw_utils
+import numpy
+from pycbc_glue.ligolw import table, lsctables, utils as ligolw_utils
 from pycbc_glue.segments import segment, segmentlist
 
 
@@ -206,7 +205,7 @@ def get_segment_definer_comments(xml_file, include_version=True):
     lsctables.use_in(h)
 
     # read segment definer table
-    xmldoc, digest = ligolw_utils.load_fileobj(xml_file,
+    xmldoc, _ = ligolw_utils.load_fileobj(xml_file,
                                         gz=xml_file.name.endswith(".gz"),
                                         contenthandler=h)
     seg_def_table = table.get_table(xmldoc,
