@@ -18,14 +18,17 @@ probability density function of distributions.
 """
 
 from pycbc.distributions.angular import *
-from pycbc.distributions.from_file import *
+from pycbc.distributions.arbitrary import *
 from pycbc.distributions.gaussian import *
 from pycbc.distributions.power_law import *
 from pycbc.distributions.sky_location import *
 from pycbc.distributions.uniform import *
+from pycbc.distributions.spins import IndependentChiPChiEff
 
 # a dict of all available distributions
 distribs = {
+    IndependentChiPChiEff.name : IndependentChiPChiEff,
+    Arbitrary.name : Arbitrary,
     FromFile.name : FromFile,
     Gaussian.name : Gaussian,
     UniformPowerLaw.name : UniformPowerLaw,

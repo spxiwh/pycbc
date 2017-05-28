@@ -709,10 +709,10 @@ class Logit(BaseTransform):
         x = maps[self._inputvar]
         # check that x is in bounds
         isin = self._bounds.__contains__(x)
-        if isinstance(isin, numpy.ndarray) and not isin.all():
+        if isinstance(isin, numpy.ndarray):
+            isin = isin.all()
+        if not isin:
             raise ValueError("one or more values are not in bounds")
-        elif not isin:
-            raise ValueError("{} is not in bounds".format(x))
         out = {self._outputvar : self.logit(x, self._a, self._b)}
         return self.format_output(maps, out)
 
@@ -1208,6 +1208,36 @@ def apply_transforms(samples, transforms, inverse=False):
         except NotImplementedError:
             continue
     return samples
+
+
+def compute_jacobian(samples, transforms, inverse=False):
+    """Computes the jacobian of the list of transforms at the given sample
+    points.
+
+    Parameters
+    ----------
+    samples : {FieldArray, dict}
+        Mapping object specifying points at which to compute jacobians.
+    transforms : list
+        List of BaseTransform instances to apply. Nested transforms are assumed
+        to be in order for forward transforms.
+    inverse : bool, optional
+        Compute inverse jacobians. Default is False.
+
+    Returns
+    -------
+    float :
+        The product of the jacobians of all fo the transforms.
+    """
+    j = 1.
+    if inverse:
+        for t in transforms:
+            j *= t.inverse_jacobian(samples)
+    else:
+        for t in transforms:
+            j *= t.jacobian(samples)
+    return j
+
 
 def order_transforms(transforms):
     """Orders transforms to ensure proper chaining.
