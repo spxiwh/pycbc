@@ -264,6 +264,11 @@ def from_cli(opt, dyn_range_fac=1, precision='single',
         if precision == 'single':
             logging.info("Converting to float32")
             strain = (strain * dyn_range_fac).astype(pycbc.types.float32)
+        elif precision == "double":
+            logging.info("Converting to float64")
+            strain = (strain * dyn_range_fac).astype(pycbc.types.float64)
+        else:
+            raise ValueError("unrecognized precision {}".format(precision))
 
         if opt.gating_file is not None:
             logging.info("Gating glitches")
@@ -1120,7 +1125,7 @@ class StrainBuffer(pycbc.frame.DataBuffer):
                  increment_update_cache=None,
                  analyze_flags=None,
                  data_quality_flags=None,
-                 ):
+                 dq_padding=0):
         """ Class to produce overwhitened strain incrementally
         
         Parameters
@@ -1182,6 +1187,8 @@ class StrainBuffer(pycbc.frame.DataBuffer):
             *any* use.
         data_quality_flags: list of strs
             The flags used to determine if to keep triggers.
+        dq_padding: {float, 0}, optional
+            Extra seconds to consider invalid before/after times with bad DQ.
         increment_update_cache: {str, None}, Optional
             Pattern to look for frame files in a GPS dependent directory. This
             is an alternate to the forced updated of the frame cache, and
@@ -1200,6 +1207,7 @@ class StrainBuffer(pycbc.frame.DataBuffer):
         self.data_quality_flags = data_quality_flags
         self.state = None
         self.dq = None
+        self.dq_padding = dq_padding
 
         # State channel
         if state_channel is not None:

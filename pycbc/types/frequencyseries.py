@@ -124,6 +124,37 @@ class FrequencySeries(Array):
                                delta_f=new_delta_f,
                                epoch=self._epoch,
                                copy=False)
+    @property
+    def start_time(self):
+        """Return the start time of this vector
+        """
+        return self.epoch
+
+    @property
+    def end_time(self):
+        """Return the end time of this vector
+        """
+        return self.start_time + self.duration
+
+    @property
+    def duration(self):
+        """Return the time duration of this vector
+        """
+        return 1.0 / self.delta_f
+
+    @property
+    def delta_t(self):
+        """Return the time between samples if this were a time series.
+        This assume the time series is even in length!
+        """
+        return 1.0 / self.sample_rate
+
+    @property
+    def sample_rate(self):
+        """Return the sample rate this would have in the time domain. This 
+        assumes even length time series!
+        """
+        return (len(self) - 1) * self.delta_f * 2.0
 
     def __eq__(self,other):
         """
@@ -387,7 +418,9 @@ class FrequencySeries(Array):
 
     @_noreal
     def to_timeseries(self, delta_t=None):
-        """ Return the Fourier transform of this time series
+        """ Return the Fourier transform of this time series.
+
+        Note that this assumes even length time series!
         
         Parameters
         ----------

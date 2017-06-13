@@ -26,6 +26,7 @@ This modules provides classes and functions for evaluating the log likelihood
 for parameter estimation.
 """
 
+from pycbc import conversions
 from pycbc import filter
 import pycbc.transforms
 from pycbc.waveform import NoWaveformError
@@ -48,32 +49,6 @@ class _NoPrior(object):
 
     def __call__(self, **params):
         return 0.
-
-def snr_from_loglr(loglr):
-    """Returns SNR computed from the given log likelihood ratio(s). This is
-    defined as `sqrt(2*loglr)`.If the log likelihood ratio is < 0, returns 0.
-
-    Parameters
-    ----------
-    loglr : array or float
-        The log likelihood ratio(s) to evaluate.
-
-    Returns
-    -------
-    array or float
-        The SNRs computed from the log likelihood ratios.
-    """
-    singleval = isinstance(loglr, float)
-    if singleval:
-        loglr = numpy.array([loglr])
-    # temporarily quiet sqrt(-1) warnings
-    numpysettings = numpy.seterr(invalid='ignore')
-    snrs = numpy.sqrt(2*loglr)
-    numpy.seterr(**numpysettings)
-    snrs[numpy.isnan(snrs)] = 0.
-    if singleval:
-        snrs = snrs[0]
-    return snrs
 
 class _BaseLikelihoodEvaluator(object):
     r"""Base container class for generating waveforms, storing the data, and
@@ -352,6 +327,8 @@ class _BaseLikelihoodEvaluator(object):
         """
         logj = self.logjacobian(**params)
         logp = self._prior(**params) + logj
+        if numpy.isnan(logp):
+            logp = -numpy.inf
         return self._formatreturn(logp, prior=logp, logjacobian=logj)
 
     def prior_rvs(self, size=1, prior=None):
@@ -464,7 +441,7 @@ class _BaseLikelihoodEvaluator(object):
         """Returns the "SNR" of the given params. This will return
         imaginary values if the log likelihood ratio is < 0.
         """
-        return snr_from_loglr(self.loglr(**params))
+        return conversions.snr_from_loglr(self.loglr(**params))
 
     _callfunc = logposterior
 
@@ -682,9 +659,7 @@ class GaussianLikelihood(_BaseLikelihoodEvaluator):
         # we'll store the weight to apply to the inner product
         if psds is None:
             w = Array(numpy.sqrt(norm)*numpy.ones(N))
-            # FIXME: use the following when we've switched to 2.7
-            #self._weight = {det: w for det in data} 
-            self._weight = dict([(det, w) for det in data])
+            self._weight = {det: w for det in data} 
         else:
             # temporarily suppress numpy divide by 0 warning
             numpysettings = numpy.seterr(divide='ignore')
