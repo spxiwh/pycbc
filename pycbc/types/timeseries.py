@@ -147,6 +147,21 @@ class TimeSeries(Array):
         return int(1.0/self.delta_t)
     sample_rate = property(get_sample_rate,
                            doc="The sample rate of the time series.")
+
+    def time_slice(self, start, end):
+        """Return the slice of the time series that contains the time range
+        in GPS seconds.
+        """
+        if start < self.start_time:
+            raise ValueError('Time series does not contain a time as early as %s' % start)
+
+        if end > self.end_time:
+            raise ValueError('Time series does not contain a time as late as %s' % end)
+
+        start_idx = int((start - self.start_time) * self.sample_rate)
+        end_idx = int((end - self.start_time) * self.sample_rate)
+        return self[start_idx:end_idx]
+
     @property
     def delta_f(self):
         """Return the delta_f this ts would have in the frequency domain
@@ -386,6 +401,116 @@ class TimeSeries(Array):
         """
         scaled = _numpy.int16(self.numpy()/max(abs(self)) * 32767)
         write_wav(file_name, self.sample_rate, scaled)
+        
+    def psd(self, segment_duration, **kwds):
+        """ Calculate the power spectral density of this time series.
+        
+        Use the `pycbc.psd.welch` method to estimate the psd of this time segment.
+        For more complete options, please see that function.
+        
+        Parameters
+        ----------
+        segment_duration: float
+            Duration in seconds to use for each sample of the spectrum.
+        kwds : keywords
+            Additional keyword arguments are passed on to the `pycbc.psd.welch` method.
+            
+        Returns
+        -------
+        psd : FrequencySeries
+            Frequency series containing the estimated PSD.
+        """
+        from pycbc.psd import welch
+        seg_len = int(segment_duration * self.sample_rate)
+        seg_stride = seg_len / 2
+        return welch(self, seg_len=seg_len,
+                           seg_stride=seg_stride,
+                           **kwds)
+
+    def whiten(self, segment_duration, max_filter_duration, trunc_method='hann',
+                     remove_corrupted=True, low_frequency_cutoff=None, **kwds):
+        """ Return a whitened time series
+
+        Parameters
+        ----------
+        segment_duration: float
+            Duration in seconds to use for each sample of the spectrum.
+        max_filter_duration : int
+            Maximum length of the time-domain filter in seconds.
+        trunc_method : {None, 'hann'}
+            Function used for truncating the time-domain filter.
+            None produces a hard truncation at `max_filter_len`.
+        remove_corrupted : {True, boolean}
+            If True, the region of the time series corrupted by the whitening
+            is excised before returning. If false, the corrupted regions
+            are not excised and the full time series is returned.
+        low_frequency_cutoff : {None, float}
+            Low frequency cutoff to pass to the inverse spectrum truncation.
+            This should be matched to a known low frequency cutoff of the
+            data if there is one.
+        kwds : keywords
+            Additional keyword arguments are passed on to the `pycbc.psd.welch` method.
+            
+        Returns
+        -------
+        whitened_data : TimeSeries
+            The whitened time series
+        """
+        from pycbc.psd import inverse_spectrum_truncation, interpolate
+        # Estimate the noise spectrum
+        psd = self.psd(segment_duration, **kwds)
+        psd = interpolate(psd, self.delta_f)
+        max_filter_len = int(max_filter_duration * self.sample_rate)
+        
+        # Interpolate and smooth to the desired corruption length
+        psd = inverse_spectrum_truncation(psd,
+                   max_filter_len=max_filter_len,
+                   low_frequency_cutoff=low_frequency_cutoff,
+                   trunc_method=trunc_method)
+
+        # Whiten the data by the asd
+        white = (self.to_frequencyseries() / psd ** 0.5).to_timeseries()
+
+        if remove_corrupted:
+            white = white[max_filter_len/2:len(self)-max_filter_len/2]
+
+        return white
+
+    def qtransform(self, delta_t, delta_f,
+                  frange=(0,_numpy.inf), qrange=(4,64), mismatch=0.2):
+        """ Return the interpolated 2d qtransform of this data
+        
+        Parameters
+        ----------
+        delta_t : float
+            The time resolution
+        delta_f : float
+            The frequency resolution
+        frange : {(0, inf), tuple}
+            frequency range
+        qrange : {(4, 64), tuple}
+            q range
+        mismatch : float
+            Mismatch between frequency tiles
+         
+        Returns
+        -------
+        times : numpy.ndarray
+            The time that the qtransform is sampled.
+        freqs : numpy.ndarray
+            The frequencies that the qtransform is samled.
+        qplane : numpy.ndarray (2d)
+            The two dimensional interpolated qtransform of this time series.
+        """
+        from pycbc.filter.qtransform import qtiling, qplane
+        q_base, q_frange = qtiling(self, qrange, frange, mismatch)
+        q_plane, _ = qplane(q_base, self.to_frequencyseries(), q_frange,
+                            fres=delta_f, tres=delta_t)
+        times = _numpy.linspace(float(self.start_time),
+                                float(self.end_time),
+                                self.duration / delta_t)
+        freqs = _numpy.arange(int(q_frange[0]), int(q_frange[1]), delta_f)
+        return times, freqs, q_plane
 
     def save(self, path, group = None):
         """
