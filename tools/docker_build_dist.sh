@@ -24,7 +24,7 @@ fi
 LALSUITE_HASH="539c8700af92eb6dd00e0e91b9dbaf5bae51f004"
 
 if [ "x$TRAVIS_TAG" == "x" ] ; then
-  TRAVIS_TAG="latest"
+  TRAVIS_TAG="master"
   RSYNC_OPTIONS="--delete"
 else
   RSYNC_OPTIONS=""
@@ -78,7 +78,7 @@ if [ "x${PYCBC_CONTAINER}" == "xpycbc_inspiral_bundle" ] ; then
     echo -e "\\n>> [`date`] Deploying pycbc_inspiral bundle to sugwg-condor.phy.syr.edu"
     ssh pycbc@sugwg-condor.phy.syr.edu "mkdir -p ${BUNDLE_DEST}"
     scp ${BUILD}/pycbc-build/environment/dist/pycbc_inspiral_osg* pycbc@sugwg-condor.phy.syr.edu:${BUNDLE_DEST}/pycbc_inspiral
-    if [ "x${TRAVIS_TAG}" != "xlatest" ] ; then
+    if [ "x${TRAVIS_TAG}" != "xmaster" ] ; then
       PYCBC_INSPIRAL_SUFFIX="_osg_${TRAVIS_TAG}"
       BUNDLE_DEST=/home/login/ouser.ligo/ligo/deploy/sw/pycbc/x86_64_rhel_6/bundle/${TRAVIS_TAG}
       echo -e "\\n>> [`date`] Deploying pycbc_inspiral${PYCBC_INSPIRAL_SUFFIX} to CVMFS"
@@ -186,8 +186,8 @@ if [ "x${PYCBC_CONTAINER}" == "xpycbc_rhel_virtualenv" ] || [ "x${PYCBC_CONTAINE
   pip install -r requirements.txt
   python setup.py install
 
-  echo -e "\\n>> [`date`] Installing PyCBC PyLAL"
-  pip install pycbc-pylal
+  echo -e "\\n>> [`date`] Installing PyCBC PyLAL 1.0.2"
+  pip install "pycbc-pylal==1.0.2"
 
   echo -e "\\n>> [`date`] Installing modules needed to build documentation"
   pip install "Sphinx>=1.5.0"
@@ -235,7 +235,7 @@ EOF
     echo -e "\\n>> [`date`] Deploying virtual environment to sugwg-condor.phy.syr.edu"
     ssh pycbc@sugwg-condor.phy.syr.edu "mkdir -p /home/pycbc/ouser.ligo/ligo/deploy/sw/pycbc/${ENV_OS}/virtualenv/pycbc-${TRAVIS_TAG}"
     rsync --rsh=ssh $RSYNC_OPTIONS -qraz ${VENV_PATH}/ pycbc@sugwg-condor.phy.syr.edu:/home/pycbc/ouser.ligo/ligo/deploy/sw/pycbc/${ENV_OS}/virtualenv/pycbc-${TRAVIS_TAG}/
-    if [ "x${TRAVIS_TAG}" != "xlatest" ] ; then
+    if [ "x${TRAVIS_TAG}" != "xmaster" ] ; then
       echo -e "\\n>> [`date`] Deploying release ${TRAVIS_TAG} to CVMFS"
       # remove lalsuite source and deploy on cvmfs
       rm -rf ${VENV_PATH}/src/lalsuite

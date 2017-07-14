@@ -270,8 +270,8 @@ def get_version_info():
 
     # If this is a release or another kind of source distribution of PyCBC
     except:
-        version = '1.8.0dev'
-        release = 'False'
+        version = '1.7.5'
+        release = 'True'
         date = hash = branch = tag = author = committer = status = builder = build_date = ''
 
         with open('pycbc/version.py', 'w') as f:
@@ -393,6 +393,7 @@ setup (
                'bin/pycbc_optimal_snr',
                'bin/pycbc_fit_sngl_trigs',
                'bin/pycbc_randomize_inj_dist_by_optsnr',
+               'bin/pycbc_create_injections',
                'bin/hdfcoinc/pycbc_calculate_psd',
                'bin/hdfcoinc/pycbc_average_psd',
                'bin/hdfcoinc/pycbc_coinc_mergetrigs',
