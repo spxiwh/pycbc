@@ -168,6 +168,27 @@ def _lalsim_td_waveform(**p):
 
     return hp, hc
 
+def _lalsim_td_from_fd_waveform(**p):
+    lal_pars = _check_lal_pars(p)
+    hp1, hc1 = lalsimulation.SimInspiralTD(
+           float(pnutils.solar_mass_to_kg(p['mass1'])),
+           float(pnutils.solar_mass_to_kg(p['mass2'])),
+           float(p['spin1x']), float(p['spin1y']), float(p['spin1z']),
+           float(p['spin2x']), float(p['spin2y']), float(p['spin2z']),
+           pnutils.megaparsecs_to_meters(float(p['distance'])),
+           float(p['inclination']), float(p['coa_phase']),
+           float(p['long_asc_nodes']), float(p['eccentricity']),
+           float(p['mean_per_ano']),
+           float(p['delta_t']), float(p['f_lower']), float(p['f_ref']),
+           lal_pars,
+           _lalsim_enum[p['approximant']])
+
+    hp = TimeSeries(hp1.data.data[:], delta_t=hp1.deltaT, epoch=hp1.epoch)
+    hc = TimeSeries(hc1.data.data[:], delta_t=hc1.deltaT, epoch=hc1.epoch)
+
+    return hp, hc
+
+
 def _spintaylor_aligned_prec_swapper(**p):
     """
     SpinTaylorF2 is only single spin, it also struggles with anti-aligned spin
@@ -223,16 +244,18 @@ def _lalsim_sgburst_waveform(**p):
     return hp, hc
 
 for approx_enum in xrange(0, lalsimulation.NumApproximants):
+    if lalsimulation.SimInspiralImplementedFDApproximants(approx_enum):
+        approx_name = lalsimulation.GetStringFromApproximant(approx_enum)
+        _lalsim_enum[approx_name] = approx_enum
+        # Be careful! Some approximants appear in both FD and TD lists!
+        _lalsim_td_approximants[approx_name] = _lalsim_td_from_fd_waveform
+        _lalsim_fd_approximants[approx_name] = _lalsim_fd_waveform
+
+for approx_enum in xrange(0, lalsimulation.NumApproximants):
     if lalsimulation.SimInspiralImplementedTDApproximants(approx_enum):
         approx_name = lalsimulation.GetStringFromApproximant(approx_enum)
         _lalsim_enum[approx_name] = approx_enum
         _lalsim_td_approximants[approx_name] = _lalsim_td_waveform
-
-for approx_enum in xrange(0, lalsimulation.NumApproximants):
-    if lalsimulation.SimInspiralImplementedFDApproximants(approx_enum):
-        approx_name = lalsimulation.GetStringFromApproximant(approx_enum)
-        _lalsim_enum[approx_name] = approx_enum
-        _lalsim_fd_approximants[approx_name] = _lalsim_fd_waveform
 
 # sine-Gaussian burst
 for approx_enum in xrange(0, lalsimulation.NumApproximants):
