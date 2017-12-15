@@ -21,7 +21,7 @@ else
 fi
 
 # set the lalsuite checkout to use
-LALSUITE_HASH="539c8700af92eb6dd00e0e91b9dbaf5bae51f004"
+LALSUITE_HASH="8cbd1b7187ce3ed9a825d6ed11cc432f3cfde9a5"
 
 if [ "x$TRAVIS_TAG" == "x" ] ; then
   TRAVIS_TAG="master"
@@ -96,9 +96,21 @@ if [ "x${PYCBC_CONTAINER}" == "xpycbc_rhel_virtualenv" ] || [ "x${PYCBC_CONTAINE
   if [ "x${PYCBC_CONTAINER}" == "xpycbc_rhel_virtualenv" ] ; then
     echo -e "\\n>> [`date`] Building pycbc virtual environment for CentOS 7"
     ENV_OS="x86_64_rhel_7"
+    yum -y install python2-pip python-setuptools which
+    yum -y install curl
+    curl http://download.pegasus.isi.edu/wms/download/rhel/7/pegasus.repo > /etc/yum.repos.d/pegasus.repo
+    yum clean all
+    yum makecache
+    yum -y update
+    yum -y install openssl-devel openssl-static
+    yum -y install pegasus
+    yum -y install ligo-proxy-utils
+    yum -y install ecp-cookie-init
+    yum -y install hdf5-static libxml2-static zlib-static libstdc++-static cfitsio-static glibc-static fftw-static gsl-static
   elif [ "x${PYCBC_CONTAINER}" == "xpycbc_debian_virtualenv" ] ; then
     echo -e "\\n>> [`date`] Building pycbc virtual environment for Debian"
     ENV_OS="x86_64_deb_8"
+    apt-get update
     apt-get -y install python-pip
     apt-get -y install curl
     echo "deb http://software.ligo.org/gridtools/debian jessie main" > /etc/apt/sources.list.d/gridtools.list
@@ -114,6 +126,7 @@ if [ "x${PYCBC_CONTAINER}" == "xpycbc_rhel_virtualenv" ] || [ "x${PYCBC_CONTAINE
     apt-get -y install ligo-proxy-utils
     apt-get -y install ecp-cookie-init
     apt-get -y install uuid-runtime
+    apt-get -y install openssl swig
   else
     echo -e "\\n>> [`date`] Unknown operating system for virtual environment build"
     exit 1
@@ -142,12 +155,12 @@ if [ "x${PYCBC_CONTAINER}" == "xpycbc_rhel_virtualenv" ] || [ "x${PYCBC_CONTAINE
   echo -e "\\n>> [`date`] Installing scipy"
   pip install "scipy>=0.13.0" &>/dev/null
   echo -e "\\n>> [`date`] Installing M2Crypto"
-  SWIG_FEATURES="-cpperraswarn -includeall -I/usr/include/openssl" pip install M2Crypto
+  SWIG_FEATURES="-cpperraswarn -includeall -I/usr/include/openssl" pip install 'M2Crypto==0.25.1'
 
   echo -e "\\n>> [`date`] Installing LAL"
   mkdir -p ${VIRTUAL_ENV}/src
   cd ${VIRTUAL_ENV}/src
-  git clone https://github.com/lscsoft/lalsuite.git
+  git clone https://git.ligo.org/lscsoft/lalsuite-archive.git lalsuite
   cd ${VIRTUAL_ENV}/src/lalsuite
   git checkout ${LALSUITE_HASH}
   ./00boot
@@ -161,33 +174,25 @@ if [ "x${PYCBC_CONTAINER}" == "xpycbc_rhel_virtualenv" ] || [ "x${PYCBC_CONTAINE
   source ${VENV_PATH}/bin/activate
   cd $VIRTUAL_ENV/src/lalsuite/lalapps
   if [ "x${PYCBC_CONTAINER}" == "xpycbc_rhel_virtualenv" ] ; then
-    LIBS="-lhdf5_hl -lhdf5 -ldl -lz" ./configure --prefix=${VIRTUAL_ENV}/opt/lalsuite --enable-static-binaries --disable-lalinference --disable-lalburst --disable-lalpulsar --disable-lalstochastic 2>&1 | grep -v checking
+    LIBS="-lhdf5_hl -lhdf5 -lcrypto -lssl -ldl -lz -lstdc++" ./configure --prefix=${VIRTUAL_ENV}/opt/lalsuite --enable-static-binaries --disable-lalxml --disable-lalinference --disable-lalburst --disable-lalpulsar --disable-lalstochastic 2>&1 | grep -v checking
   elif [ "x${PYCBC_CONTAINER}" == "xpycbc_debian_virtualenv" ] ; then
-    LIBS="-L/usr/lib/x86_64-linux-gnu/hdf5/serial -lhdf5_hl -lhdf5 -ldl -lz" ./configure --prefix=${VIRTUAL_ENV}/opt/lalsuite --enable-static-binaries --disable-lalinference --disable-lalburst --disable-lalpulsar --disable-lalstochastic 2>&1 | grep -v checking
+    LIBS="-L/usr/lib/x86_64-linux-gnu/hdf5/serial -lhdf5_hl -lhdf5 -lcrypto -lssl -ldl -lz -lstdc++" ./configure --prefix=${VIRTUAL_ENV}/opt/lalsuite --enable-static-binaries --disable-lalxml --disable-lalinference --disable-lalburst --disable-lalpulsar --disable-lalstochastic 2>&1 | grep -v checking
   fi
   cd $VIRTUAL_ENV/src/lalsuite/lalapps/src/lalapps
   make -j 2 2>&1 | grep Entering
   cd $VIRTUAL_ENV/src/lalsuite/lalapps/src/inspiral
   make lalapps_inspinj
   cp lalapps_inspinj $VIRTUAL_ENV/bin
-  cd $VIRTUAL_ENV/src/lalsuite/lalapps/src/ring
-  make lalapps_coh_PTF_inspiral
-  cp lalapps_coh_PTF_inspiral $VIRTUAL_ENV/bin
-
-  echo -e "\\n>> [`date`] Installing Pegasus and DQSegDB"
-  pip install http://download.pegasus.isi.edu/pegasus/4.7.4/pegasus-python-source-4.7.4.tar.gz
-  pip install dqsegdb
 
   echo -e "\\n>> [`date`] Install matplotlib 1.5.3"
   pip install 'matplotlib==1.5.3'
 
-  echo -e "\\n>> [`date`] Installing PyCBC and dependencies"
+  echo -e "\\n>> [`date`] Installing PyCBC dependencies from requirements.txt"
   cd /pycbc
   pip install -r requirements.txt
-  python setup.py install
 
-  echo -e "\\n>> [`date`] Installing PyCBC PyLAL 1.0.2"
-  pip install "pycbc-pylal==1.0.2"
+  echo -e "\\n>> [`date`] Installing PyCBC from source"
+  python setup.py install
 
   echo -e "\\n>> [`date`] Installing modules needed to build documentation"
   pip install "Sphinx>=1.5.0"
@@ -197,6 +202,10 @@ if [ "x${PYCBC_CONTAINER}" == "xpycbc_rhel_virtualenv" ] || [ "x${PYCBC_CONTAINE
   echo -e "\\n>> [`date`] Installing ipython and jupyter"
   pip install ipython
   pip install jupyter
+  pip install hide_code
+  jupyter nbextension install --sys-prefix --py hide_code
+  jupyter nbextension enable --sys-prefix --py hide_code
+  jupyter serverextension enable --sys-prefix --py hide_code
 
   cat << EOF >> $VIRTUAL_ENV/bin/activate
 
@@ -212,8 +221,8 @@ elif [ -f /ldcg/intel/2017u0/compilers_and_libraries_2017.0.098/linux/mkl/bin/mk
   . /ldcg/intel/2017u0/compilers_and_libraries_2017.0.098/linux/mkl/bin/mklvars.sh intel64
 fi
 
-# Use the revison 11 ROM data from CVMFS
-export LAL_DATA_PATH=/cvmfs/oasis.opensciencegrid.org/ligo/sw/pycbc/lalsuite-extra/11/share/lalsimulation
+# Use the ROM data from CVMFS
+export LAL_DATA_PATH=/cvmfs/oasis.opensciencegrid.org/ligo/sw/pycbc/lalsuite-extra/e02dab8c/share/lalsimulation
 EOF
 
   deactivate

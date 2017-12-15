@@ -255,6 +255,24 @@ dquad_mon1 = Parameter("dquad_mon1",
 dquad_mon2 = Parameter("dquad_mon2",
                 dtype=float, default=0., label=r"$qm_2$",
                 description="Quadrupole-monopole parameter / m_2^5 -1.")
+lambda_octu1 = Parameter("lambda_octu1",
+                dtype=float, default=0., label=r"$\Lambda_3^{(1)}$",
+                description="The octupolar tidal deformability parameter of object 1.")
+lambda_octu2 = Parameter("lambda_octu2",
+                dtype=float, default=0., label=r"$\Lambda_3^{(2)}$",
+                description="The octupolar tidal deformability parameter of object 2.")
+quadfmode1 = Parameter("quadfmode1",
+                dtype=float, default=0., label=r"$m_1 \omega_{02}^{(1)}$",
+                description="The quadrupolar f-mode angular frequency of object 1.")
+quadfmode2 = Parameter("quadfmode2",
+                dtype=float, default=0., label=r"$m_ \omega_{02}^{(2)}$",
+                description="The quadrupolar f-mode angular frequency of object 2.")
+octufmode1 = Parameter("octufmode1",
+                dtype=float, default=0., label=r"$m_1 \omega_{03}^{(1)}$",
+                description="The octupolar f-mode angular frequency of object 1.")
+octufmode2 = Parameter("octufmode2",
+                dtype=float, default=0., label=r"$m_ \omega_{03}^{(2)}$",
+                description="The octupolar f-mode angular frequency of object 2.")
 
 # derived parameters for component spin magnitude and angles
 spin1_a = Parameter("spin1_a",
@@ -347,6 +365,9 @@ numrel_data = Parameter("numrel_data",
 distance = Parameter("distance",
                 dtype=float, default=1., label=r"$d_L$ (Mpc)",
                 description="Luminosity distance to the binary (in Mpc).")
+chirp_distance = Parameter("chirp_distance",
+                dtype=float, default=1., label=r"$d_c$ (Mpc)",
+                description="Chirp distance to the binary (in Mpc).")
 coa_phase = Parameter("coa_phase",
                 dtype=float, default=0., label=r"$\phi_c$",
                 description="Coalesence phase of the binary (in rad).")
@@ -378,6 +399,29 @@ redshift = Parameter("redshift",
                 description="Redshift.")
 
 #
+#   Calibration parameters
+#
+delta_fs = Parameter("calib_delta_fs",
+                     dtype=float,
+                     description="Change in optical spring freq (Hz).")
+delta_fc = Parameter("calib_delta_fc",
+                     dtype=float,
+                     description="Change in cavity pole freq (Hz).")
+delta_qinv = Parameter("calib_delta_qinv",
+                       dtype=float,
+                       description="Change in inverse quality factor.")
+kappa_c = Parameter("calib_kappa_c",
+                    dtype=float)
+kappa_tst_re = Parameter("calib_kappa_tst_re",
+                         dtype=float)
+kappa_tst_im = Parameter("calib_kappa_tst_im",
+                         dtype=float)
+kappa_pu_re = Parameter("calib_kappa_pu_re",
+                        dtype=float)
+kappa_pu_im = Parameter("calib_kappa_pu_im",
+                        dtype=float)
+
+#
 #   Non mandatory flags with default values
 #
 frame_axis = Parameter("frame_axis",
@@ -389,7 +433,14 @@ modes_choice = Parameter("modes_choice",
 side_bands = Parameter("side_bands",
                 dtype=int, default=0,
                 description="Flag for generating sidebands")
-
+mode_array = Parameter("mode_array",
+                dtype=int, default=0,
+                description="Choose which (l,m) modes to include when "
+                            "generating a waveform. "
+                            "Only if approximant supports this feature."
+                            "By default pass None and let lalsimulation "
+                            "use it's default behaviour."
+                            "Example: mode_array = [ [2,2], [2,-2] ]")
 #
 # =============================================================================
 #
@@ -411,15 +462,22 @@ location_params = ParameterList([tc, ra, dec, polarization])
 orientation_params = ParameterList([distance, coa_phase, inclination, long_asc_nodes, mean_per_ano])
 
 # the extrinsic parameters of a waveform
-extrinsic_params = orientation_params + location_params 
+extrinsic_params = orientation_params + location_params
 
 # intrinsic parameters of a CBC waveform
 cbc_intrinsic_params = ParameterList([
     mass1, mass2, spin1x, spin1y, spin1z, spin2x, spin2y, spin2z,
-    eccentricity, lambda1, lambda2, dquad_mon1, dquad_mon2])
+    eccentricity, lambda1, lambda2, dquad_mon1, dquad_mon2,
+    lambda_octu1, lambda_octu2, quadfmode1, quadfmode2,
+    octufmode1, octufmode2])
 
 # the parameters of a cbc in the radiation frame
 cbc_rframe_params = cbc_intrinsic_params + orientation_params
+
+# calibration parameters
+calibration_params = ParameterList([
+    delta_fc, delta_fs, delta_qinv, kappa_c, kappa_tst_re, kappa_tst_im,
+    kappa_pu_re, kappa_pu_im])
 
 # common generation parameters are parameters needed to generate either
 # a TD, FD, or frequency sequence waveform
@@ -428,7 +486,7 @@ common_generation_params = ParameterList([
 
 # Flags having discrete values, optional to generate either
 # a TD, FD, or frequency sequence waveform
-flags_generation_params = ParameterList([frame_axis, modes_choice, side_bands])
+flags_generation_params = ParameterList([frame_axis, modes_choice, side_bands, mode_array])
 
 # the following are parameters needed to generate an FD or TD waveform that
 # is equally sampled

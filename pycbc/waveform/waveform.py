@@ -98,6 +98,18 @@ def _check_lal_pars(p):
         lalsimulation.SimInspiralWaveformParamsInsertTidalLambda1(lal_pars, p['lambda1'])
     if p['lambda2']:
         lalsimulation.SimInspiralWaveformParamsInsertTidalLambda2(lal_pars, p['lambda2'])
+    if p['lambda_octu1'] != parameters.lambda_octu1.default:
+        lalsimulation.SimInspiralWaveformParamsInsertTidalOctupolarLambda1(lal_pars, p['lambda_octu1'])
+    if p['lambda_octu2'] != parameters.lambda_octu2.default:
+        lalsimulation.SimInspiralWaveformParamsInsertTidalOctupolarLambda2(lal_pars, p['lambda_octu2'])
+    if p['quadfmode1'] != parameters.quadfmode1.default:
+        lalsimulation.SimInspiralWaveformParamsInsertTidalQuadrupolarFMode1(lal_pars, p['quadfmode1'])
+    if p['quadfmode2'] != parameters.quadfmode2.default:
+        lalsimulation.SimInspiralWaveformParamsInsertTidalQuadrupolarFMode2(lal_pars, p['lambda_octu2'])
+    if p['octufmode1'] != parameters.octufmode1.default:
+        lalsimulation.SimInspiralWaveformParamsInsertTidalOctupolarFMode1(lal_pars, p['octufmode1'])
+    if p['octufmode2'] != parameters.octufmode2.default:
+        lalsimulation.SimInspiralWaveformParamsInsertTidalOctupolarFMode2(lal_pars, p['octufmode2'])
     if p['dquad_mon1']:
         lalsimulation.SimInspiralWaveformParamsInsertdQuadMon1(lal_pars, p['dquad_mon1'])
     if p['dquad_mon2']:
@@ -110,6 +122,12 @@ def _check_lal_pars(p):
         lalsimulation.SimInspiralWaveformParamsInsertFrameAxis(lal_pars, p['frame_axis'])
     if p['side_bands']:
         lalsimulation.SimInspiralWaveformParamsInsertSideband(lal_pars, p['side_bands'])
+    if p['mode_array']:
+        ma = lalsimulation.SimInspiralCreateModeArray()
+        for l,m in p['mode_array']:
+            lalsimulation.SimInspiralModeArrayActivateMode(ma, l, m)
+        lalsimulation.SimInspiralWaveformParamsInsertModeArray(lal_pars, ma)
+
     return lal_pars
 
 def _lalsim_td_waveform(**p):
@@ -239,7 +257,6 @@ _cuda_td_approximants = {}
 _cuda_fd_approximants = {}
 
 if pycbc.HAVE_CUDA:
-    from pycbc.waveform.TaylorF2 import taylorf2 as cuda_taylorf2
     from pycbc.waveform.pycbc_phenomC_tmplt import imrphenomc_tmplt
     from pycbc.waveform.SpinTaylorF2 import spintaylorf2 as cuda_spintaylorf2
     _cuda_fd_approximants["IMRPhenomC"] = imrphenomc_tmplt
@@ -665,6 +682,7 @@ _filter_time_lengths["SEOBNRv1_ROM_EffectiveSpin"] = seobnrv2_length_in_time
 _filter_time_lengths["SEOBNRv1_ROM_DoubleSpin"] = seobnrv2_length_in_time
 _filter_time_lengths["SEOBNRv2_ROM_EffectiveSpin"] = seobnrv2_length_in_time
 _filter_time_lengths["SEOBNRv2_ROM_DoubleSpin"] = seobnrv2_length_in_time
+_filter_time_lengths["EOBNRv2_ROM"] = seobnrv2_length_in_time
 _filter_time_lengths["EOBNRv2HM_ROM"] = seobnrv2_length_in_time
 _filter_time_lengths["SEOBNRv2_ROM_DoubleSpin_HI"] = seobnrv2_length_in_time
 _filter_time_lengths["SEOBNRv4_ROM"] = seobnrv4_length_in_time
@@ -672,11 +690,15 @@ _filter_time_lengths["IMRPhenomC"] = imrphenomd_length_in_time
 _filter_time_lengths["IMRPhenomD"] = imrphenomd_length_in_time
 _filter_time_lengths["IMRPhenomPv2"] = imrphenomd_length_in_time
 _filter_time_lengths["SpinTaylorF2"] = spa_length_in_time
+_filter_time_lengths["TaylorF2NL"] = spa_length_in_time
 
 # Also add generators for switching between approximants
 apx_name = "SpinTaylorF2_SWAPPER"
 cpu_fd[apx_name] =  _spintaylor_aligned_prec_swapper
 _filter_time_lengths[apx_name] = _filter_time_lengths["SpinTaylorF2"]
+
+from . nltides import nonlinear_tidal_spa
+cpu_fd["TaylorF2NL"] = nonlinear_tidal_spa
 
 # We can do interpolation for waveforms that have a time length
 for apx in copy.copy(_filter_time_lengths):

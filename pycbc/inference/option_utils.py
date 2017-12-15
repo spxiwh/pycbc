@@ -20,13 +20,16 @@
 import logging
 import numpy
 import pycbc.inference.sampler
+from pycbc.inference import burn_in
 from pycbc import conversions
 from pycbc import transforms
 from pycbc.distributions import bounded
 from pycbc.distributions import constraints
-from pycbc.io import InferenceFile
+from pycbc.io.inference_hdf import InferenceFile
+from pycbc.io.inference_txt import InferenceTXTFile
 from pycbc.inference import likelihood
 from pycbc.workflow import WorkflowConfigParser
+from pycbc.workflow import ConfigParser
 from pycbc.pool import choose_pool
 from pycbc.psd import from_cli_multi_ifos as psd_from_cli_multi_ifos
 from pycbc.strain import from_cli_multi_ifos as strain_from_cli_multi_ifos
@@ -116,14 +119,19 @@ def read_args_from_config(cp, section_group=None, prior_section='prior'):
     variable_args = cp.options("{}variable_args".format(section_prefix))
     subsections = cp.get_subsections("{}{}".format(section_prefix,
                                                    prior_section))
-    tags = numpy.concatenate([tag.split("+") for tag in subsections])
-    if not any(param in tags for param in variable_args):
-        raise KeyError("You are missing a priors section in the config file.")
+    tags = set([p for tag in subsections for p in tag.split('+')])
+    missing_prior = set(variable_args) - tags
+    if any(missing_prior):
+        raise KeyError("You are missing a priors section in the config file "
+                       "for parameter(s): {}".format(', '.join(missing_prior)))
 
     # get parameters that do not change in sampler
-    static_args = dict([(key,cp.get_opt_tags(
-        "{}static_args".format(section_prefix), key, []))
-        for key in cp.options("{}static_args".format(section_prefix))])
+    try:
+        static_args = dict([(key,cp.get_opt_tags(
+            "{}static_args".format(section_prefix), key, []))
+            for key in cp.options("{}static_args".format(section_prefix))])
+    except ConfigParser.NoSectionError:
+        static_args = {}
     # try converting values to float
     for key,val in static_args.iteritems():
         try:
@@ -234,8 +242,19 @@ def add_sampler_option_group(parser):
     sampler_group.add_argument("--sampler", required=True,
         choices=pycbc.inference.sampler.samplers.keys(),
         help="Sampler class to use for finding posterior.")
-    sampler_group.add_argument("--niterations", type=int, required=True,
-        help="Number of iterations to perform after burn in.")
+    sampler_group.add_argument("--niterations", type=int,
+        help="Number of iterations to perform. If 'use_sampler' is given to "
+             "burn-in-function, this will be counted after the sampler's burn "
+             "function has run. Otherwise, this is the total number of "
+             "iterations, including any burn in.")
+    sampler_group.add_argument("--n-independent-samples", type=int,
+        help="Run the sampler until the specified number of "
+             "independent samples is obtained, at minimum. Requires "
+             "checkpoint-interval. At each checkpoint the burn-in iteration "
+             "and ACL is updated. The number of independent samples is the "
+             "number of samples across all walkers starting at the "
+             "burn-in-iteration and skipping every `ACL`th iteration. "
+             "Either this or niteration should be specified (but not both).")
     # sampler-specific options
     sampler_group.add_argument("--nwalkers", type=int, default=None,
         help="Number of walkers to use in sampler. Required for MCMC "
@@ -243,16 +262,20 @@ def add_sampler_option_group(parser):
     sampler_group.add_argument("--ntemps", type=int, default=None,
         help="Number of temperatures to use in sampler. Required for parallel "
              "tempered MCMC samplers.")
-    sampler_group.add_argument("--min-burn-in", type=int, default=None,
+    sampler_group.add_argument("--burn-in-function", default=None, nargs='+',
+        choices=burn_in.burn_in_functions.keys(),
+        help="Use the given function to determine when chains are burned in. "
+             "If none provided, no burn in will be estimated. "
+             "If multiple functions are provided, will use the maximum "
+             "iteration from all functions.")
+    sampler_group.add_argument("--min-burn-in", type=int, default=0,
         help="Force the burn-in to be at least the given number of "
-             "iterations. If a sampler has an internal algorithm for "
-             "determining the burn-in size (e.g., kombine), and it returns "
-             "a value < this, the burn-in will be repeated until the "
-             "number of iterations is at least this value.")
+             "iterations.")
     sampler_group.add_argument("--skip-burn-in", action="store_true",
         default=False,
-        help="Do not burn in with sampler. An error will be raised if "
-             "min-burn-in is also provided.")
+        help="DEPRECATED. Turning this option on has no effect; "
+             "it will be removed in future versions. If no burn in is "
+             "desired, simply do not provide a burn-in-function argument.")
     sampler_group.add_argument("--update-interval", type=int, default=None,
         help="If using kombine, specify the number of steps to take between "
              "proposal updates. Note: for purposes of updating, kombine "
@@ -291,9 +314,6 @@ def sampler_from_cli(opts, likelihood_evaluator, pool=None):
         likelihood_call = None
 
     sclass = pycbc.inference.sampler.samplers[opts.sampler]
-    # check for consistency
-    if opts.skip_burn_in and opts.min_burn_in is not None:
-        raise ValueError("both skip-burn-in and min-burn-in specified")
 
     pool = choose_pool(mpi=opts.use_mpi, processes=opts.nprocesses)
 
@@ -315,7 +335,7 @@ def add_low_frequency_cutoff_opt(parser):
     # FIXME: this just uses the same frequency cutoff for every instrument for
     # now. We should allow for different frequency cutoffs to be used; that
     # will require (minor) changes to the Likelihood class
-    parser.add_argument("--low-frequency-cutoff", type=float, required=True,
+    parser.add_argument("--low-frequency-cutoff", type=float,
                         help="Low frequency cutoff for each IFO.")
 
 
@@ -423,7 +443,7 @@ def data_from_cli(opts):
 #
 #-----------------------------------------------------------------------------
 
-def add_inference_results_option_group(parser):
+def add_inference_results_option_group(parser, include_parameters_group=True):
     """Adds the options used to call pycbc.inference.results_from_cli function
     to an argument parser. These are options releated to loading the results
     from a run of pycbc_inference, for purposes of plotting and/or creating
@@ -433,21 +453,20 @@ def add_inference_results_option_group(parser):
     ----------
     parser : object
         ArgumentParser instance.
+    include_parameters_group : bool
+        If true then include `--parameters-group` option.
     """
 
     results_reading_group = parser.add_argument_group("Arguments for loading "
         "inference results")
 
     # required options
-    results_reading_group.add_argument("--input-file", type=str, required=True,
-        help="Path to input HDF file.")
     results_reading_group.add_argument(
-        "--parameters-group", type=str, default=InferenceFile.samples_group,
-        choices=[InferenceFile.samples_group, InferenceFile.stats_group],
-        help="Group in the HDF InferenceFile to look for parameters.")
+        "--input-file", type=str, required=True, nargs="+",
+        help="Path to input HDF files.")
     results_reading_group.add_argument("--parameters", type=str, nargs="+",
         metavar="PARAM[:LABEL]",
-        help="Name of parameters to plot. If none provided will load all of "
+        help="Name of parameters to load. If none provided will load all of "
              "the variable args in the input-file. If provided, the "
              "parameters can be any of the variable args or posteriors in "
              "the input file, derived parameters from them, or any function "
@@ -474,11 +493,44 @@ def add_inference_results_option_group(parser):
         help="Only retrieve the given iteration. To load the last n-th sampe "
              "use -n, e.g., -1 will load the last iteration. This overrides "
              "the thin-start/interval/end options.")
+    if include_parameters_group:
+        results_reading_group.add_argument(
+            "--parameters-group", type=str,
+            default=InferenceFile.samples_group,
+            choices=[InferenceFile.samples_group, InferenceFile.stats_group],
+            help="Group in the HDF InferenceFile to look for parameters.")
 
     return results_reading_group
 
 
-def results_from_cli(opts, load_samples=True, walkers=None):
+def parse_parameters_opt(parameters):
+    """Parses the --parameters opt in the results_reading_group.
+
+    Parameters
+    ----------
+    parameters : list of str or None
+        The parameters to parse.
+    Returns
+    -------
+    parameters : list of str
+        The parameters.
+    labels : dict
+        A dictionary mapping parameters for which labels were provide to those
+        labels.
+    """
+    if parameters is None:
+        return None, {}
+    # load the labels
+    labels = {}
+    for ii,p in enumerate(parameters):
+        if len(p.split(':')) == 2:
+            p, label = p.split(':')
+            parameters[ii] = p
+            labels[p] = label
+    return parameters, labels
+
+
+def results_from_cli(opts, load_samples=True, **kwargs):
     """
     Loads an inference result file along with any labels associated with it
     from the command line options.
@@ -491,56 +543,120 @@ def results_from_cli(opts, load_samples=True, walkers=None):
         Load samples from the results file using the parameters, thin_start,
         and thin_interval specified in the options. The samples are returned
         as a FieldArray instance.
-    walkers : {None, (list of) int}
-        If loading samples, the walkers to load from. If None, will load from
-        all walkers.
+
+    \**kwargs :
+        All other keyword arguments are passed to the InferenceFile's
+        read_samples function.
 
     Returns
     -------
-    result_file : pycbc.io.InferenceFile
-        The result file as an InferenceFile.
-    parameters : list
+    fp_all : pycbc.io.InferenceFile
+        The result file as an InferenceFile. If more than one input file,
+        then it returns a list.
+    parameters_all : list
         List of the parameters to use, parsed from the parameters option.
-    labels : list
-        List of labels to associate with the parameters.
-    samples : {None, FieldArray}
+        If more than one input file, then it returns a list.
+    labels_all : list
+        List of labels to associate with the parameters. If more than one
+        input file, then it returns a list.
+    samples_all : {None, FieldArray}
         If load_samples, the samples as a FieldArray; otherwise, None.
+        If more than one input file, then it returns a list.
     """
 
-    logging.info("Reading input file")
-    fp = InferenceFile(opts.input_file, "r")
-    parameters = fp.variable_args if opts.parameters is None \
-                 else opts.parameters
+    # lists for files and samples from all input files
+    fp_all = []
+    parameters_all = []
+    labels_all = []
+    samples_all = []
 
-    # load the labels
-    labels = []
-    for ii,p in enumerate(parameters):
-        if len(p.split(':')) == 2:
-            p, label = p.split(':')
-            parameters[ii] = p
-        else:
-            label = fp.read_label(p)
-        labels.append(label)
+    input_files = opts.input_file
+    if isinstance(input_files, str):
+        input_files = [input_files]
 
-    # load the samples
-    if load_samples:
-        logging.info("Loading samples")
-        # check if need extra parameters for a non-sampling parameter
-        file_parameters, ts = transforms.get_common_cbc_transforms(
+    # loop over all input files
+    input_files = [opts.input_file] if isinstance(opts.input_file, str) \
+                                                           else opts.input_file
+    for input_file in input_files:
+        logging.info("Reading input file %s", input_file)
+
+        # read input file
+        fp = InferenceFile(input_file, "r")
+
+        # get parameters and a dict of labels for each parameter
+        parameters = fp.variable_args if opts.parameters is None \
+                         else opts.parameters
+        parameters, ldict = parse_parameters_opt(parameters)
+
+        # convert labels dict to list
+        labels = []
+        for p in parameters:
+            try:
+                label = ldict[p]
+            except KeyError:
+                label = fp.read_label(p)
+            labels.append(label)
+
+        # load the samples
+        if load_samples:
+            logging.info("Loading samples")
+
+            # check if need extra parameters for a non-sampling parameter
+            file_parameters, ts = transforms.get_common_cbc_transforms(
                                                  parameters, fp.variable_args)
-        # read samples from file
-        samples = fp.read_samples(
-            file_parameters, walkers=walkers,
-            thin_start=opts.thin_start, thin_interval=opts.thin_interval,
-            thin_end=opts.thin_end, iteration=opts.iteration,
-            samples_group=opts.parameters_group)
-        # add parameters not included in file
-        samples = transforms.apply_transforms(samples, ts)
-    else:
-        samples = None
 
-    return fp, parameters, labels, samples
+            # read samples from file
+            samples = fp.read_samples(
+                file_parameters, thin_start=opts.thin_start,
+                thin_interval=opts.thin_interval, thin_end=opts.thin_end,
+                iteration=opts.iteration,
+                samples_group=opts.parameters_group, **kwargs)
 
+            # add parameters not included in file
+            samples = transforms.apply_transforms(samples, ts)
+
+        # else do not read samples
+        else:
+            samples = None
+
+        # add results to lists from all input files
+        if len(input_files) > 1:
+            fp_all.append(fp)
+            parameters_all.append(parameters)
+            labels_all.append(labels)
+            samples_all.append(samples)
+
+        # else only one input file then do not return lists
+        else:
+            fp_all = fp
+            parameters_all = parameters
+            labels_all = labels
+            samples_all = samples
+
+    return fp_all, parameters_all, labels_all, samples_all
+
+def get_file_type(filename):
+    """ Returns I/O object to use for file.
+
+    Parameters
+    ----------
+    filename : str
+        Name of file.
+
+    Returns
+    -------
+    file_type : {InferenceFile, InferenceTXTFile}
+        The type of inference file object to use.
+    """
+    txt_extensions = [".txt", ".dat", ".csv"]
+    hdf_extensions = [".hdf", ".h5"]
+    for ext in hdf_extensions:
+        if filename.endswith(ext):
+            return InferenceFile
+    for ext in txt_extensions:
+        if filename.endswith(ext):
+            return InferenceTXTFile
+    raise TypeError("Extension is not supported.")
 
 def get_zvalues(fp, arg, likelihood_stats):
     """Reads the data for the z-value of the plots from the inference file.
@@ -598,6 +714,10 @@ def add_plot_posterior_option_group(parser):
     pgroup.add_argument('--plot-marginal', action='store_true', default=False,
                         help="Plot 1D marginalized distributions on the "
                              "diagonal axes.")
+    pgroup.add_argument('--marginal-percentiles', nargs='+', default=None,
+                        type=float,
+                        help="Percentiles to draw lines at on the 1D "
+                             "histograms.")
     pgroup.add_argument("--plot-scatter", action='store_true', default=False,
                         help="Plot each sample point as a scatter plot.")
     pgroup.add_argument("--plot-density", action="store_true", default=False,
@@ -605,6 +725,10 @@ def add_plot_posterior_option_group(parser):
     pgroup.add_argument("--plot-contours", action="store_true", default=False,
                         help="Draw contours showing the 50th and 90th "
                              "percentile confidence regions.")
+    pgroup.add_argument('--contour-percentiles', nargs='+', default=None,
+                        type=float,
+                        help="Percentiles to draw contours if different "
+                             "than 50th and 90th.")
     # add mins, maxs options
     pgroup.add_argument('--mins', nargs='+', metavar='PARAM:VAL', default=[],
                         help="Specify minimum parameter values to plot. This "
@@ -742,7 +866,7 @@ def add_density_option_group(parser):
     density_group.add_argument("--density-cmap", type=str, default='viridis',
                     help="Specify the colormap to use for the density. "
                          "Default is viridis.")
-    density_group.add_argument("--contour-color", type=str,
+    density_group.add_argument("--contour-color", type=str, default=None,
                     help="Specify the color to use for the contour lines. "
                          "Default is white for density plots and black "
                          "for scatter plots.")

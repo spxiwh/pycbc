@@ -111,7 +111,8 @@ def locations_to_cache(locations):
     return cum_cache
 
 def read_frame(location, channels, start_time=None, 
-               end_time=None, duration=None, check_integrity=True):
+               end_time=None, duration=None, check_integrity=True,
+               sieve=None):
     """Read time series from frame data.
 
     Using the `location`, which can either be a frame file ".gwf" or a 
@@ -137,6 +138,9 @@ def read_frame(location, channels, start_time=None,
         incompatible with `end`.
     check_integrity : {True, bool}, optional
         Test the frame files for internal integrity.
+    sieve : string, optional
+        Selects only frames where the frame URL matches the regular
+        expression sieve
 
     Returns
     -------
@@ -154,6 +158,10 @@ def read_frame(location, channels, start_time=None,
         locations = [location]
 
     cum_cache = locations_to_cache(locations)    
+    if sieve:
+        logging.info("Using frames that match regexp: %s", sieve)
+        lal.CacheSieve(cum_cache, 0, 0, None, None, sieve)
+
     stream = lalframe.FrStreamCacheOpen(cum_cache)
     stream.mode = lalframe.FR_STREAM_VERBOSE_MODE
    
@@ -245,11 +253,9 @@ def datafind_connection(server=None):
         cert_file, key_file = None, None
 
     # Is a port specified in the server URL
-    server, port = datafind_server.split(':',1)
-    if port == "":
-        port = None
-    else:
-        port = int(port)
+    dfs_fields = datafind_server.split(':', 1)
+    server = dfs_fields[0]
+    port = int(dfs_fields[1]) if len(dfs_fields) == 2 else None
 
     # Open connection to the datafind server
     if cert_file and key_file:
@@ -260,7 +266,7 @@ def datafind_connection(server=None):
                 host=server, port=port)
     return connection
     
-def frame_paths(frame_type, start_time, end_time, server=None):
+def frame_paths(frame_type, start_time, end_time, server=None, url_type='file'):
     """Return the paths to a span of frame files
     
     Parameters
@@ -274,7 +280,10 @@ def frame_paths(frame_type, start_time, end_time, server=None):
     server : {None, SERVER:PORT string}, optional
         Optional string to specify the datafind server to use. By default an
         attempt is made to use a local datafind server.
-        
+    url_type : string
+        Returns only frame URLs with a particular scheme or head such
+        as "file" or "gsiftp". Default is "file", which queries locally 
+        stored frames. Option can be disabled if set to None. 
     Returns
     -------
     paths : list of paths
@@ -286,13 +295,14 @@ def frame_paths(frame_type, start_time, end_time, server=None):
     """
     site = frame_type[0]
     connection = datafind_connection(server)
-    connection.find_times(site, frame_type, 
+    connection.find_times(site, frame_type,
                           gpsstart=start_time, gpsend=end_time)
-    cache = connection.find_frame_urls(site, frame_type, start_time, end_time)
+    cache = connection.find_frame_urls(site, frame_type, start_time, end_time,urltype=url_type)
     paths = [entry.path for entry in cache]
-    return paths    
+    return paths
     
-def query_and_read_frame(frame_type, channels, start_time, end_time):
+def query_and_read_frame(frame_type, channels, start_time, end_time,
+                         sieve=None, check_integrity=False):
     """Read time series from frame data.
 
     Query for the locatin of physical frames matching the frame type. Return
@@ -310,6 +320,11 @@ def query_and_read_frame(frame_type, channels, start_time, end_time):
         beginning of the available frame(s). 
     end_time : LIGOTimeGPS or int
         The gps end time of the time series. Defaults to the end of the frame.
+    sieve : string, optional
+        Selects only frames where the frame URL matches the regular
+        expression sieve
+    check_integrity : boolean
+        Do an expensive checksum of the file before returning.
 
     Returns
     -------
@@ -333,7 +348,9 @@ def query_and_read_frame(frame_type, channels, start_time, end_time):
     logging.info('found files: %s' % (' '.join(paths)))
     return read_frame(paths, channels, 
                       start_time=start_time, 
-                      end_time=end_time)
+                      end_time=end_time,
+                      sieve=sieve,
+                      check_integrity=check_integrity)
     
 __all__ = ['read_frame', 'frame_paths', 
            'datafind_connection', 
@@ -613,12 +630,10 @@ class DataBuffer(object):
             if lal.GPSTimeNow() > timeout + self.raw_buffer.end_time:
                 # The frame is not there and it should be by now, so we give up
                 # and treat it as zeros
-                logging.info('{0} frame missing, giving up'.format(self.detector))
                 DataBuffer.null_advance(self, blocksize)
                 return None
             else:
                 # I am too early to give up on this frame, so we should try again
-                logging.info('{0} frame missing, waiting a bit more'.format(self.detector))
                 time.sleep(1)
                 return self.attempt_advance(blocksize, timeout=timeout)
 
@@ -751,10 +766,9 @@ class StatusBuffer(DataBuffer):
             Returns True if all of the status information if valid,
             False if any is not.
         """
-        if self.increment_update_cache:
-            self.update_cache_by_increment(blocksize)
-
         try:
+            if self.increment_update_cache:
+                self.update_cache_by_increment(blocksize)
             ts = DataBuffer.advance(self, blocksize)
             return self.check_valid(ts)
         except RuntimeError:

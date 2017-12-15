@@ -390,7 +390,29 @@ class TimeSeries(Array):
         lal_data.data.data[:] = self.numpy()
 
         return lal_data
-      
+
+    def crop(self, left, right):
+        """ Remove given seconds from either end of time series
+
+        Parameters
+        ----------
+        left : float
+            Number of seconds of data to remove from the left of the time series.
+        right : float
+            Number of seconds of data to remove from the right of the time series.
+
+        Returns
+        -------
+        cropped : pycbc.types.TimeSeries
+            The reduced time series
+        """
+        if left + right > self.duration:
+            raise ValueError('Cannot crop more data than we have')
+
+        s = int(left * self.sample_rate)
+        e = len(self) - int(right * self.sample_rate)
+        return self[s:e]
+
     def save_to_wav(self, file_name):
         """ Save this time series to a wav format audio file.
         
@@ -476,41 +498,171 @@ class TimeSeries(Array):
 
         return white
 
-    def qtransform(self, delta_t, delta_f,
-                  frange=(0,_numpy.inf), qrange=(4,64), mismatch=0.2):
+    def qtransform(self, delta_t=None, delta_f=None, logfsteps=None,
+                  frange=None, qrange=(4,64), mismatch=0.2, return_complex=False):
         """ Return the interpolated 2d qtransform of this data
         
         Parameters
         ----------
-        delta_t : float
-            The time resolution
-        delta_f : float
-            The frequency resolution
-        frange : {(0, inf), tuple}
+        delta_t : {self.delta_t, float}
+            The time resolution to interpolate to
+        delta_f : float, Optional
+            The frequency resolution to interpolate to
+        logfsteps : int
+            Do a log interpolation (incompatible with delta_f option) and set
+            the number of steps to take.
+        frange : {(30, nyquist*0.8), tuple of ints}
             frequency range
         qrange : {(4, 64), tuple}
             q range
         mismatch : float
             Mismatch between frequency tiles
+        return_complex: {False, bool}
+            return the raw complex series instead of the normalized power.
          
         Returns
         -------
         times : numpy.ndarray
             The time that the qtransform is sampled.
         freqs : numpy.ndarray
-            The frequencies that the qtransform is samled.
+            The frequencies that the qtransform is sampled.
         qplane : numpy.ndarray (2d)
             The two dimensional interpolated qtransform of this time series.
         """
         from pycbc.filter.qtransform import qtiling, qplane
-        q_base, q_frange = qtiling(self, qrange, frange, mismatch)
-        q_plane, _ = qplane(q_base, self.to_frequencyseries(), q_frange,
-                            fres=delta_f, tres=delta_t)
-        times = _numpy.linspace(float(self.start_time),
-                                float(self.end_time),
-                                self.duration / delta_t)
-        freqs = _numpy.arange(int(q_frange[0]), int(q_frange[1]), delta_f)
+        from scipy.interpolate import interp2d       
+
+        if frange is None:
+            frange = (30, int(self.sample_rate / 2 * 8))
+        
+        q_base = qtiling(self, qrange, frange, mismatch)
+        q, times, freqs, q_plane = qplane(q_base, self.to_frequencyseries(),
+                                          frange, return_complex=return_complex)
+        if logfsteps and delta_f:
+            raise ValueError("Provide only one (or none) of delta_f and logfsteps")
+
+        # Interpolate if requested
+        if delta_f or delta_t or logfsteps:
+            if return_complex:
+                interp_amp = interp2d(times, freqs, abs(q_plane))   
+                interp_phase = interp2d(times, freqs, _numpy.angle(q_plane))             
+            else:
+                interp = interp2d(times, freqs, q_plane)
+            
+        if delta_t:
+            times = _numpy.arange(float(self.start_time),
+                                    float(self.end_time), delta_t)
+        if delta_f:
+            freqs = _numpy.arange(int(frange[0]), int(frange[1]), delta_f)
+        if logfsteps:
+            freqs = _numpy.logspace(_numpy.log10(frange[0]),
+                                    _numpy.log10(frange[1]),
+                                     logfsteps)
+
+        if delta_f or delta_t or logfsteps:
+            if return_complex:
+                q_plane = _numpy.exp(1.0j * interp_phase(times, freqs))
+                q_plane *= interp_amp(times, freqs)
+            else:
+                q_plane = interp(times, freqs)
+
         return times, freqs, q_plane
+
+    def notch_fir(self, f1, f2, order, beta=5.0, remove_corrupted=True):
+        """ notch filter the time series using an FIR filtered generated from
+        the ideal response passed through a time-domain kaiser
+        window (beta = 5.0)
+
+        The suppression of the notch filter is related to the bandwidth and
+        the number of samples in the filter length. For a few Hz bandwidth,
+        a length corresponding to a few seconds is typically
+        required to create significant suppression in the notched band.
+
+        Parameters
+        ----------
+        Time Series: TimeSeries
+            The time series to be notched.
+        f1: float
+            The start of the frequency suppression.
+        f2: float
+            The end of the frequency suppression.
+        order: int
+            Number of corrupted samples on each side of the time series
+        beta: float
+            Beta parameter of the kaiser window that sets the side lobe attenuation.
+        """
+        from pycbc.filter import notch_fir
+        ts = notch_fir(self, f1, f2, order, beta=beta)
+        if remove_corrupted:
+            ts = ts[order:len(ts)-order]
+        return ts
+
+    def lowpass_fir(self, frequency, order, beta=5.0, remove_corrupted=True):
+        """ Lowpass filter the time series using an FIR filtered generated from 
+        the ideal response passed through a kaiser window (beta = 5.0)
+
+        Parameters
+        ----------
+        Time Series: TimeSeries
+            The time series to be low-passed.
+        frequency: float
+            The frequency below which is suppressed. 
+        order: int
+            Number of corrupted samples on each side of the time series
+        beta: float
+            Beta parameter of the kaiser window that sets the side lobe attenuation.
+        remove_corrupted : {True, boolean}
+            If True, the region of the time series corrupted by the filtering
+            is excised before returning. If false, the corrupted regions
+            are not excised and the full time series is returned.
+        """
+        from pycbc.filter import lowpass_fir
+        ts = lowpass_fir(self, frequency, order, beta=beta)
+        if remove_corrupted:
+            ts = ts[order:len(ts)-order]
+        return ts
+
+    def highpass_fir(self, frequency, order, beta=5.0, remove_corrupted=True):
+        """ Highpass filter the time series using an FIR filtered generated from 
+        the ideal response passed through a kaiser window (beta = 5.0)
+
+        Parameters
+        ----------
+        Time Series: TimeSeries
+            The time series to be high-passed.
+        frequency: float
+            The frequency below which is suppressed. 
+        order: int
+            Number of corrupted samples on each side of the time series
+        beta: float
+            Beta parameter of the kaiser window that sets the side lobe attenuation.
+        remove_corrupted : {True, boolean}
+            If True, the region of the time series corrupted by the filtering
+            is excised before returning. If false, the corrupted regions
+            are not excised and the full time series is returned.
+        """
+        from pycbc.filter import highpass_fir
+        ts = highpass_fir(self, frequency, order, beta=beta)
+        if remove_corrupted:
+            ts = ts[order:len(ts)-order]
+        return ts
+
+    def fir_zero_filter(self, coeff):
+        """Filter the timeseries with a set of FIR coefficients
+        
+        Parameters
+        ----------
+        coeff: numpy.ndarray
+            FIR coefficients. Should be and odd length and symmetric.
+
+        Returns
+        -------
+        filtered_series: pycbc.types.TimeSeries
+            Return the filtered timeseries, which has been properly shifted to account
+        for the FIR filter delay and the corrupted regions zeroed out.
+        """
+        from pycbc.filter import fir_zero_filter
+        return self._return(fir_zero_filter(coeff, self))
 
     def save(self, path, group = None):
         """
@@ -597,6 +749,79 @@ class TimeSeries(Array):
                            delta_f=delta_f)
         fft(tmp, f)
         return f
+
+    @_nocomplex
+    def cyclic_time_shift(self, dt):
+        """Shift the data and timestamps by a given number of seconds
+        
+        Shift the data and timestamps in the time domain a given number of 
+        seconds. To just change the time stamps, do ts.start_time += dt. 
+        The time shift may be smaller than the intrinsic sample rate of the data.
+        Note that data will be cycliclly rotated, so if you shift by 2
+        seconds, the final 2 seconds of your data will now be at the 
+        beginning of the data set.
+
+        Parameters
+        ----------
+        dt : float
+            Amount of time to shift the vector.
+
+        Returns
+        -------
+        data : pycbc.types.TimeSeries
+            The time shifted time series.
+        """
+        # We do this in the frequency domain to allow us to do sub-sample
+        # time shifts. This also results in the shift being circular. It
+        # is left to a future update to do a faster impelementation in the case
+        # where the time shift can be done with an exact number of samples.
+        return self.to_frequencyseries().cyclic_time_shift(dt).to_timeseries()
+
+    def match(self, other, psd=None,
+              low_frequency_cutoff=None, high_frequency_cutoff=None):
+        """ Return the match between the two TimeSeries or FrequencySeries.
+
+        Return the match between two waveforms. This is equivelant to the overlap
+        maximized over time and phase. By default, the other vector will be
+        resized to match self. This may remove high frequency content or the
+        end of the vector.
+
+        Parameters
+        ----------
+        other : TimeSeries or FrequencySeries
+            The input vector containing a waveform.
+        psd : Frequency Series
+            A power spectral density to weight the overlap.
+        low_frequency_cutoff : {None, float}, optional
+            The frequency to begin the match.
+        high_frequency_cutoff : {None, float}, optional
+            The frequency to stop the match.
+
+        Returns
+        -------
+        match: float
+        index: int
+            The number of samples to shift to get the match.
+        """
+        return self.to_frequencyseries().match(other, psd=psd,
+                     low_frequency_cutoff=low_frequency_cutoff,
+                     high_frequency_cutoff=high_frequency_cutoff)
+
+    def detrend(self, type='linear'):
+        """ Remove linear trend from the data
+
+        Remove a linear trend from the data to improve the approximation that
+        the data is circularly convolved, this helps reduce the size of filter
+        transients from a circular convolution / filter.
+
+        Parameters
+        ----------
+        type: str
+            The choice of detrending. The default ('linear') removes a linear
+        least squares fit. 'constant' removes only the mean of the data.
+        """
+        from scipy.signal import detrend
+        return self._return(detrend(self.numpy(), type=type))
 
 def load_timeseries(path, group=None):
     """

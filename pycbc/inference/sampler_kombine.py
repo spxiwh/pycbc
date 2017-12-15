@@ -57,9 +57,6 @@ class KombineSampler(BaseMCMCSampler):
     processes : {None, int}
         Number of processes to use with multiprocessing. If None, all available
         cores are used.
-    min_burn_in : {None, int}
-        Set the minimum number of burn in iterations to use. If None,
-        `burn_in_iterations` will be initialized to `0`.
     update_interval : {None, int}
         Make the sampler update the proposal densities every `update_interval`
         iterations.
@@ -67,7 +64,7 @@ class KombineSampler(BaseMCMCSampler):
     name = "kombine"
 
     def __init__(self, likelihood_evaluator, nwalkers, transd=False,
-                 min_burn_in=None, pool=None, likelihood_call=None,  
+                 pool=None, likelihood_call=None,
                  update_interval=None):
 
         try:
@@ -79,13 +76,13 @@ class KombineSampler(BaseMCMCSampler):
             likelihood_call = likelihood_evaluator
 
         # construct sampler for use in KombineSampler
-        ndim = len(likelihood_evaluator.waveform_generator.variable_args)
+        ndim = len(likelihood_evaluator.variable_args)
+        count = 1 if pool is None else pool.count
         sampler = kombine.Sampler(nwalkers, ndim, likelihood_call,
                                   transd=transd, pool=pool,
-                                  processes=pool.count)
+                                  processes=count)
         # initialize
-        super(KombineSampler, self).__init__(sampler, likelihood_evaluator,
-                                             min_burn_in=min_burn_in)
+        super(KombineSampler, self).__init__(sampler, likelihood_evaluator)
         self._nwalkers = nwalkers
         self.update_interval = update_interval
 
@@ -106,8 +103,9 @@ class KombineSampler(BaseMCMCSampler):
         KombineSampler
             A kombine sampler initialized based on the given arguments.
         """
-        return cls(likelihood_evaluator, opts.nwalkers, likelihood_call=likelihood_call,
-                   min_burn_in=opts.min_burn_in, pool=pool, update_interval=opts.update_interval)
+        return cls(likelihood_evaluator, opts.nwalkers,
+                   likelihood_call=likelihood_call,
+                   pool=pool, update_interval=opts.update_interval)
 
     def run(self, niterations, **kwargs):
         """Advance the sampler for a number of samples.
@@ -213,16 +211,9 @@ class KombineSampler(BaseMCMCSampler):
         else:
             blob0 = None
         res = self._sampler.burnin(self.p0, blob0=blob0)
+        # store the number of iterations used
+        self.burn_in_iterations = numpy.repeat(self.niterations, self.nwalkers)
         p, post, q = res[0], res[1], res[2]
-        # continue running until minimum burn in is satistfied
-        while self.niterations < self.burn_in_iterations:
-            p0 = p
-            res = self._sampler.burnin(p0)
-            p, post, q = res[0], res[1], res[2]
-            # update position
-            self._pos = p
-            self._currentblob = self._sampler.blobs[-1]
-        self.burn_in_iterations = self.niterations
         return p, post, q
 
     def _write_kde(self, fp, dataset_name, kde):
@@ -236,19 +227,24 @@ class KombineSampler(BaseMCMCSampler):
         except KeyError:
             # dataset doesn't exist yet
             fp.create_dataset(dataset_name, shape,
-                              maxshape=(self.nwalkers,
+                              maxshape=(self._sampler._kde_size,
                                         len(self.variable_args)),
                               dtype=float)
             fp[dataset_name][:] = kde.data
 
     def write_state(self, fp):
-        """ Saves the state of the sampler in a file.
+        """Saves the state of the sampler in a file.
+
+        In addition to the numpy random state, the current KDE used for the
+        jump proposals is saved.
 
         Parameters
         ----------
         fp : InferenceFile
             File to store sampler state.
         """
+        # save the numpy random state
+        super(KombineSampler, self).write_state(fp)
 
         # save clustered KDE data
         subgroup = "clustered_kde"
@@ -267,19 +263,25 @@ class KombineSampler(BaseMCMCSampler):
             dataset_name = "/".join([fp.sampler_group, "kde" + str(i)])
             self._write_kde(fp, dataset_name, kde)
 
+
     def set_state_from_file(self, fp):
-        """ Sets the state of the sampler back to the instance saved in a file.
+        """Sets the state of the sampler back to the instance saved in a file.
+
+        In addition to the numpy random state, the current KDE used for the
+        jump proposals is loaded.
 
         Parameters
         ----------
         fp : InferenceFile
             File with sampler state stored.
         """
-
         try:
             import kombine
         except ImportError:
             raise ImportError("kombine is not installed.")
+
+        # set the numpy random state
+        super(KombineSampler, self).set_state_from_file(fp)
 
         # create a ClusteredKDE
         dataset_name = "/".join([fp.sampler_group, "clustered_kde"])

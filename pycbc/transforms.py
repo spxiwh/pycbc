@@ -160,6 +160,92 @@ class BaseTransform(object):
         return out
 
 
+class CustomTransform(BaseTransform):
+    """Allows for any transform to be defined.
+
+    Parameters
+    ----------
+    input_args : (list of) str
+        The names of the input parameters.
+    output_args : (list of) str
+        The names of the output parameters.
+    transform_functions : dict
+        Dictionary mapping input args to a string giving a function call;
+        e.g., ``{'q': 'q_from_mass1_mass2(mass1, mass2)'}``.
+    jacobian : str, optional
+        String giving a jacobian function. The function must be in terms of
+        the input arguments.
+    """
+    name = "custom"
+
+    def __init__(self, input_args, output_args, transform_functions,
+                 jacobian=None):
+        if isinstance(input_args, str) or isinstance(input_args, unicode):
+            input_args = [input_args]
+        if isinstance(output_args, str) or isinstance(output_args, unicode):
+            output_args = [output_args]
+        self.inputs = set(input_args)
+        self.outputs = set(output_args)
+        self.transform_functions = transform_functions
+        self._jacobian = jacobian
+        # we'll create a scratch FieldArray space to do transforms on
+        self._scratch = record.FieldArray(1, dtype=[(p, float)
+            for p in self.inputs])
+
+    def _copytoscratch(self, maps):
+        for p in self.inputs:
+            self._scratch[p][:] = maps[p]
+
+    def transform(self, maps):
+        if self.transform_functions is None:
+            raise NotImplementedError("no transform function(s) provided")
+        # copy values to scratch
+        self._copytoscratch(maps)
+        # evaluate the functions
+        out = {p: self._scratch[func][0]
+               for p,func in self.transform_functions.items()}
+        return self.format_output(maps, out)
+
+    def jacobian(self, maps):
+        if self._jacobian is None:
+            raise NotImplementedError("no jacobian provided")
+        # copy values to scratch
+        self._copytoscratch(maps)
+        return self._scratch[self._jacobian][0]
+
+    @classmethod
+    def from_config(cls, cp, section, outputs):
+        """Loads a CustomTransform from the given config file.
+
+        Example section:
+
+        .. code-block:: ini
+
+            [{section}-outvar1+outvar2]
+            name = custom
+            inputs = inputvar1, inputvar2
+            outvar1 = func1(inputs)
+            outvar2 = func2(inputs)
+            jacobian = func(inputs)
+        """
+        tag = outputs
+        outputs = set(outputs.split(VARARGS_DELIM))
+        inputs = map(str.strip,
+                     cp.get_opt_tag(section, 'inputs', tag).split(','))
+        # get the functions for each output
+        transform_functions = {}
+        for var in outputs:
+            # check if option can be cast as a float
+            func = cp.get_opt_tag(section, var, tag)
+            transform_functions[var] = func
+        s = '-'.join([section, tag])
+        if cp.has_option(s, 'jacobian'):
+            jacobian = cp.get_opt_tag(section, 'jacobian', tag)
+        else:
+            jacobian = None
+        return cls(inputs, outputs, transform_functions, jacobian=jacobian)
+
+
 #
 # =============================================================================
 #
@@ -246,7 +332,7 @@ class MchirpQToMass1Mass2(BaseTransform):
         return self.format_output(maps, out)
 
     def jacobian(self, maps):
-        """Returns the Jacobian for the transforming mchirp and q to mass1 and
+        """Returns the Jacobian for transforming mchirp and q to mass1 and
         mass2.
         """
         mchirp = maps['mchirp']
@@ -254,12 +340,103 @@ class MchirpQToMass1Mass2(BaseTransform):
         return mchirp * ((1.+q)/q**3.)**(2./5)
 
     def inverse_jacobian(self, maps):
-        """Returns the Jacobian for the transforming mass1 and mass2 to
+        """Returns the Jacobian for transforming mass1 and mass2 to
         mchirp and q.
         """
         m1 = conversions.primary_mass(maps['mass1'], maps['mass2'])
         m2 = conversions.secondary_mass(maps['mass1'], maps['mass2'])
         return conversions.mchirp_from_mass1_mass2(m1, m2)/m2**2.
+
+
+class ChirpDistanceToDistance(BaseTransform):
+    """ Converts chirp distance to luminosity distance, given the chirp mass.
+    """
+    name = "chirp_distance_to_distance"
+    _inputs = [parameters.chirp_distance, parameters.mchirp]
+    _outputs = [parameters.distance]
+
+    def __init__(self, ref_mass=1.4):
+        self.inputs = set(self._inputs)
+        self.outputs = set(self._outputs)
+        self.ref_mass = ref_mass
+
+    def transform(self, maps):
+        """This function transforms from chirp distance to luminosity distance,
+        given the chirp mass.
+
+        Parameters
+        ----------
+        maps : a mapping object
+
+        Examples
+        --------
+        Convert a dict of numpy.array:
+
+        >>> import numpy as np
+        >>> from pycbc import transforms
+        >>> t = transforms.ChirpDistanceToDistance()
+        >>> t.transform({'chirp_distance': np.array([40.]), 'mchirp': np.array([1.2])})
+        {'mchirp': array([ 1.2]), 'chirp_distance': array([ 40.]), 'distance': array([ 39.48595679])}
+        
+        Returns
+        -------
+        out : dict
+            A dict with key as parameter name and value as numpy.array or float
+            of transformed values.
+        """
+        out = {}
+        out[parameters.distance] = \
+                conversions.distance_from_chirp_distance_mchirp(
+                                                    maps[parameters.chirp_distance],
+                                                    maps[parameters.mchirp],
+                                                    ref_mass=self.ref_mass)
+        return self.format_output(maps, out)
+
+    def inverse_transform(self, maps):
+        """This function transforms from luminosity distance to chirp distance,
+        given the chirp mass.
+
+        Parameters
+        ----------
+        maps : a mapping object
+
+        Examples
+        --------
+        Convert a dict of numpy.array:
+
+        >>> import numpy as np
+        >>> from pycbc import transforms
+        >>> t = transforms.ChirpDistanceToDistance()
+        >>> t.inverse_transform({'distance': np.array([40.]), 'mchirp': np.array([1.2])})
+        {'distance': array([ 40.]), 'chirp_distance': array([ 40.52073522]), 'mchirp': array([ 1.2])}
+
+        Returns
+        -------
+        out : dict
+            A dict with key as parameter name and value as numpy.array or float
+            of transformed values.
+        """
+        out = {}
+        out[parameters.chirp_distance] = \
+                conversions.chirp_distance(maps[parameters.distance],
+                                            maps[parameters.mchirp], ref_mass=self.ref_mass)
+        return self.format_output(maps, out)
+
+    def jacobian(self, maps):
+        """Returns the Jacobian for transforming chirp distance to
+        luminosity distance, given the chirp mass.
+        """
+        ref_mass=1.4
+        mchirp = maps['mchirp']
+        return (2.**(-1./5) * self.ref_mass / mchirp)**(-5./6)
+
+    def inverse_jacobian(self, maps):
+        """Returns the Jacobian for transforming luminosity distance to
+        chirp distance, given the chirp mass.
+        """
+        ref_mass=1.4
+        mchirp = maps['mchirp']
+        return (2.**(-1./5) * self.ref_mass / mchirp)**(5./6)
 
 
 class SphericalSpin1ToCartesianSpin1(BaseTransform):
@@ -322,7 +499,7 @@ class SphericalSpin1ToCartesianSpin1(BaseTransform):
 
 class SphericalSpin2ToCartesianSpin2(SphericalSpin1ToCartesianSpin1):
     """ Converts spherical spin parameters (magnitude and two angles) to
-    catesian spin parameters. This class only transforms spsins for the second
+    cartesian spin parameters. This class only transforms spins for the second
     component mass.
     """
     name = "spherical_spin_2_to_cartesian_spin_2"
@@ -389,21 +566,33 @@ class AlignedMassSpinToCartesianSpin(BaseTransform):
             A dict with key as parameter name and value as numpy.array or float
             of transformed values.
         """
+        mass1 = conversions.primary_mass(maps[parameters.mass1],
+                                         maps[parameters.mass2])
+        mass2 = conversions.secondary_mass(maps[parameters.mass1],
+                                           maps[parameters.mass2])
         out = {}
+        same_idx = numpy.where(mass1 != maps[parameters.mass1])[0]
         out[parameters.spin1z] = \
                          conversions.spin1z_from_mass1_mass2_chi_eff_chi_a(
-                               maps[parameters.mass1], maps[parameters.mass2],
+                               mass1, mass2,
                                maps[parameters.chi_eff], maps["chi_a"])
-
         out[parameters.spin2z] = \
                          conversions.spin2z_from_mass1_mass2_chi_eff_chi_a(
-                               maps[parameters.mass1], maps[parameters.mass2],
+                               mass1, mass2,
                                maps[parameters.chi_eff], maps["chi_a"])
+        if len(same_idx) and isinstance(out[parameters.spin1z], float):
+            tmp = out[parameters.spin1z]
+            out[parameters.spin1z] = out[parameters.spin2z]
+            out[parameters.spin2z] = tmp
+        elif len(same_idx):
+            tmp = out[parameters.spin1z]
+            out[parameters.spin1z][same_idx] = out[parameters.spin2z]
+            out[parameters.spin2z][same_idx] = tmp[same_idx]
         return self.format_output(maps, out)
 
     def inverse_transform(self, maps):
-        """ This function transforms from component masses and cartesian spins to
-        mass-weighted spin parameters aligned with the angular momentum.
+        """ This function transforms from component masses and cartesian spins
+        to mass-weighted spin parameters aligned with the angular momentum.
 
         Parameters
         ----------
@@ -415,13 +604,20 @@ class AlignedMassSpinToCartesianSpin(BaseTransform):
             A dict with key as parameter name and value as numpy.array or float
             of transformed values.
         """
+        mass1 = conversions.primary_mass(
+                              maps[parameters.mass1], maps[parameters.mass2])
+        spin1z = conversions.primary_spin(
+                              maps[parameters.mass1], maps[parameters.mass2],
+                              maps[parameters.spin1z], maps[parameters.spin2z])
+        mass2 = conversions.secondary_mass(
+                              maps[parameters.mass1], maps[parameters.mass2])
+        spin2z = conversions.secondary_spin(
+                              maps[parameters.mass1], maps[parameters.mass2],
+                              maps[parameters.spin1z], maps[parameters.spin2z])
         out = {
-            parameters.chi_eff : conversions.chi_eff(
-                             maps[parameters.mass1], maps[parameters.mass2],
-                             maps[parameters.spin1z], maps[parameters.spin2z]),
-            "chi_a" : conversions.chi_a(
-                             maps[parameters.mass1], maps[parameters.mass2],
-                             maps[parameters.spin1z], maps[parameters.spin2z]),
+            parameters.chi_eff : conversions.chi_eff(mass1, mass2,
+                                                     spin1z, spin2z),
+            "chi_a" : conversions.chi_a(mass1, mass2, spin1z, spin2z),
         }
         return self.format_output(maps, out)
 
@@ -519,12 +715,14 @@ class PrecessionMassSpinToCartesianSpin(BaseTransform):
             A dict with key as parameter name and value as numpy.array or float
             of transformed values.
         """
+
+        # convert
         out = {}
-        out["xi1"] = conversions.primary_xi(
+        xi1 = conversions.primary_xi(
                              maps[parameters.mass1], maps[parameters.mass2],
                              maps[parameters.spin1x], maps[parameters.spin1y],
                              maps[parameters.spin2x], maps[parameters.spin2y])
-        out["xi2"] = conversions.secondary_xi(
+        xi2 = conversions.secondary_xi(
                              maps[parameters.mass1], maps[parameters.mass2],
                              maps[parameters.spin1x], maps[parameters.spin1y],
                              maps[parameters.spin2x], maps[parameters.spin2y])
@@ -535,19 +733,39 @@ class PrecessionMassSpinToCartesianSpin(BaseTransform):
         out["phi_s"] = conversions.phi_s(
                              maps[parameters.spin1x], maps[parameters.spin1y],
                              maps[parameters.spin2x], maps[parameters.spin2y])
+
+        # map parameters from primary/secondary to indices
+        if isinstance(xi1, numpy.ndarray):
+            mass1, mass2 = map(numpy.array, [maps[parameters.mass1],
+                                             maps[parameters.mass2]])
+            mask_mass1_gte_mass2 = mass1 >= mass2
+            mask_mass1_lt_mass2 = mass1 < mass2
+            out["xi1"] = numpy.concatenate((
+                                        xi1[mask_mass1_gte_mass2],
+                                        xi2[mask_mass1_lt_mass2]))
+            out["xi2"] = numpy.concatenate((
+                                        xi1[mask_mass1_gte_mass2],
+                                        xi2[mask_mass1_lt_mass2]))
+        elif maps["mass1"] > maps["mass2"]:
+            out["xi1"] = xi1
+            out["xi2"] = xi2
+        else:
+            out["xi1"] = xi2
+            out["xi2"] = xi1
+
         return self.format_output(maps, out)
 
 
-class ChiPToCartesianSpin(BaseTransform):
-    """Converts chi_p to cartesian spins.
+class CartesianSpinToChiP(BaseTransform):
+    """Converts cartesian spins to `chi_p`.
     """
-    name = "chi_p_to_cartesian_spin"
-    _inputs = ["chi_p"]
-    _outputs = [parameters.mass1, parameters.mass2,
+    name = "cartesian_spin_to_chi_p"
+    _inputs = [parameters.mass1, parameters.mass2,
                 parameters.spin1x, parameters.spin1y,
                 parameters.spin2x, parameters.spin2y]
+    _outputs = ["chi_p"]
 
-    def inverse_transform(self, maps):
+    def transform(self, maps):
         """ This function transforms from component masses and caretsian spins
         to chi_p.
 
@@ -558,13 +776,6 @@ class ChiPToCartesianSpin(BaseTransform):
         Examples
         --------
         Convert a dict of numpy.array:
-
-        >>> import numpy
-        >>> from pycbc import transforms
-        >>> from pycbc.waveform import parameters
-        >>> cl = transforms.DistanceToRedshift()
-        >>> cl.transform({parameters.distance : numpy.array([1000])})
-            {'distance': array([1000]), 'redshift': 0.19650987609144363}
 
         Returns
         -------
@@ -739,11 +950,11 @@ class Logit(BaseTransform):
 
     def jacobian(self, maps):
         r"""Computes the Jacobian of :math:`y = \mathrm{logit}(x; a,b)`.
-        
+
         This is:
 
         .. math::
-        
+
             \frac{\mathrm{d}y}{\mathrm{d}x} = \frac{b -a}{(x-a)(b-x)},
 
         where :math:`x \in (a, b)`.
@@ -770,11 +981,11 @@ class Logit(BaseTransform):
 
     def inverse_jacobian(self, maps):
         r"""Computes the Jacobian of :math:`y = \mathrm{logistic}(x; a,b)`.
-        
+
         This is:
 
         .. math::
-        
+
             \frac{\mathrm{d}y}{\mathrm{d}x} = \frac{e^x (b-a)}{(1+e^y)^2},
 
         where :math:`y \in (a, b)`.
@@ -883,6 +1094,19 @@ class Mass1Mass2ToMchirpQ(MchirpQToMass1Mass2):
     inverse_jacobian = inverse.jacobian
 
 
+class DistanceToChirpDistance(ChirpDistanceToDistance):
+    """The inverse of ChirpDistanceToDistance.
+    """
+    name = "distance_to_chirp_distance"
+    inverse = ChirpDistanceToDistance
+    _inputs = [parameters.distance, parameters.mchirp]
+    _outputs = [parameters.chirp_distance]
+    transform = inverse.inverse_transform
+    inverse_transform = inverse.transform
+    jacobian = inverse.inverse_jacobian
+    inverse_jacobian = inverse.jacobian
+
+
 class CartesianSpin1ToSphericalSpin1(SphericalSpin1ToCartesianSpin1):
     """The inverse of SphericalSpin1ToCartesianSpin1.
     """
@@ -890,23 +1114,53 @@ class CartesianSpin1ToSphericalSpin1(SphericalSpin1ToCartesianSpin1):
     inverse = SphericalSpin1ToCartesianSpin1
     _inputs = inverse._outputs
     _outputs = inverse._inputs
-    transform = inverse.inverse_transform
-    inverse_transform = inverse.transform
     jacobian = inverse.inverse_jacobian
     inverse_jacobian = inverse.jacobian
 
+    def transform(self, maps):
+        """ This function transforms from cartesian to spherical spins.
 
-class CartesianSpin2ToSphericalSpin2(SphericalSpin2ToCartesianSpin2):
+        Parameters
+        ----------
+        maps : a mapping object
+
+        Returns
+        -------
+        out : dict
+            A dict with key as parameter name and value as numpy.array or float
+            of transformed values.
+        """
+        sx, sy, sz = self._inputs
+        data = coordinates.cartesian_to_spherical(maps[sx], maps[sy], maps[sz])
+        out = {param : val for param, val in zip(self._outputs, data)}
+        return self.format_output(maps, out)
+
+    def inverse_transform(self, maps):
+        """ This function transforms from spherical to cartesian spins.
+
+        Parameters
+        ----------
+        maps : a mapping object
+
+        Returns
+        -------
+        out : dict
+            A dict with key as parameter name and value as numpy.array or float
+            of transformed values.
+        """
+        a, az, po = self._outputs
+        data = coordinates.spherical_to_cartesian(maps[a], maps[az], maps[po])
+        out = {param : val for param, val in zip(self._outputs, data)}
+        return self.format_output(maps, out)
+
+
+class CartesianSpin2ToSphericalSpin2(CartesianSpin1ToSphericalSpin1):
     """The inverse of SphericalSpin2ToCartesianSpin2.
     """
     name = "cartesian_spin_2_to_spherical_spin_2"
     inverse = SphericalSpin2ToCartesianSpin2
     _inputs = inverse._outputs
     _outputs = inverse._inputs
-    transform = inverse.inverse_transform
-    inverse_transform = inverse.transform
-    jacobian = inverse.inverse_jacobian
-    inverse_jacobian = inverse.jacobian
 
 
 class CartesianSpinToAlignedMassSpin(AlignedMassSpinToCartesianSpin):
@@ -934,11 +1188,11 @@ class CartesianSpinToPrecessionMassSpin(PrecessionMassSpinToCartesianSpin):
     inverse_jacobian = inverse.jacobian
 
 
-class CartesianSpinToChiP(ChiPToCartesianSpin):
-    """The inverse of ChiPToCartesianSpin.
+class ChiPToCartesianSpin(CartesianSpinToChiP):
+    """The inverse of `CartesianSpinToChiP`.
     """
     name = "cartesian_spin_to_chi_p"
-    inverse = ChiPToCartesianSpin
+    inverse = CartesianSpinToChiP
     _inputs = inverse._outputs
     _outputs = inverse._inputs
     transform = inverse.inverse_transform
@@ -1053,6 +1307,7 @@ class Logistic(Logit):
 
 # set the inverse of the forward transforms to the inverse transforms
 MchirpQToMass1Mass2.inverse = Mass1Mass2ToMchirpQ
+ChirpDistanceToDistance.inverse = DistanceToChirpDistance
 SphericalSpin1ToCartesianSpin1.inverse = CartesianSpin1ToSphericalSpin1
 SphericalSpin2ToCartesianSpin2.inverse = CartesianSpin2ToSphericalSpin2
 AlignedMassSpinToCartesianSpin.inverse = CartesianSpinToAlignedMassSpin
@@ -1071,8 +1326,11 @@ Logit.inverse = Logistic
 
 # dictionary of all transforms
 transforms = {
+    CustomTransform.name : CustomTransform,
     MchirpQToMass1Mass2.name : MchirpQToMass1Mass2,
     Mass1Mass2ToMchirpQ.name : Mass1Mass2ToMchirpQ,
+    ChirpDistanceToDistance.name : ChirpDistanceToDistance,
+    DistanceToChirpDistance.name : DistanceToChirpDistance,
     SphericalSpin1ToCartesianSpin1.name : SphericalSpin1ToCartesianSpin1,
     CartesianSpin1ToSphericalSpin1.name : CartesianSpin1ToSphericalSpin1,
     SphericalSpin2ToCartesianSpin2.name : SphericalSpin2ToCartesianSpin2,
@@ -1095,7 +1353,7 @@ common_cbc_forward_transforms = [
     MchirpQToMass1Mass2(), DistanceToRedshift(),
     SphericalSpin1ToCartesianSpin1(), SphericalSpin2ToCartesianSpin2(),
     AlignedMassSpinToCartesianSpin(), PrecessionMassSpinToCartesianSpin(),
-    ChiPToCartesianSpin(),
+    ChiPToCartesianSpin(), ChirpDistanceToDistance()
 ]
 common_cbc_inverse_transforms = [_t.inverse()
                                    for _t in common_cbc_forward_transforms

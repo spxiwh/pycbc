@@ -33,6 +33,7 @@ from pycbc.waveform import NoWaveformError
 from pycbc.types import Array
 from pycbc.io import FieldArray
 import numpy
+from scipy import stats
 
 # Used to manage a likelihood instance across multiple cores or MPI
 _global_instance = None
@@ -50,7 +51,7 @@ class _NoPrior(object):
     def __call__(self, **params):
         return 0.
 
-class _BaseLikelihoodEvaluator(object):
+class BaseLikelihoodEvaluator(object):
     r"""Base container class for generating waveforms, storing the data, and
     computing posteriors.
 
@@ -58,22 +59,22 @@ class _BaseLikelihoodEvaluator(object):
     follows: Given some model parameters :math:`\Theta` and some data
     :math:`d` with noise model :math:`n`, we define:
 
-     * the *likelihood function*: :math:`p(d|\Theta)`
+     * the **likelihood function**: :math:`p(d|\Theta)`
 
-     * the *noise likelihood*: :math:`p(d|n)`
+     * the **noise likelihood**: :math:`p(d|n)`
 
-     * the *likelihood ratio*: :math:`\mathcal{L}(\Theta) = \frac{p(d|\Theta)}{p(d|n)}`
+     * the **likelihood ratio**: :math:`\mathcal{L}(\Theta) = \frac{p(d|\Theta)}{p(d|n)}`
 
-     * the *prior*: :math:`p(\Theta)`
+     * the **prior**: :math:`p(\Theta)`
 
-     * the *posterior*: :math:`p(\Theta|d) \propto p(d|\Theta)p(\Theta)`
+     * the **posterior**: :math:`p(\Theta|d) \propto p(d|\Theta)p(\Theta)`
 
-     * the *prior-weighted likelihood ratio*: :math:`\hat{\mathcal{L}}(\Theta) = \frac{p(d|\Theta)p(\Theta)}{p(d|n)}
-   
-     * the *SNR*: :math:`\rho(\Theta) = \sqrt{2\log\mathcal{L}(\Theta)}`; for
+     * the **prior-weighted likelihood ratio**: :math:`\hat{\mathcal{L}}(\Theta) = \frac{p(d|\Theta)p(\Theta)}{p(d|n)}`
+
+     * the **SNR**: :math:`\rho(\Theta) = \sqrt{2\log\mathcal{L}(\Theta)}`; for
        two detectors, this is approximately the same quantity as the coincident
        SNR used in the CBC search.
-   
+
     .. note::
 
         Although the posterior probability is only proportional to
@@ -88,45 +89,45 @@ class _BaseLikelihoodEvaluator(object):
     simply sum over the detectors. For example, the log likelihood ratio is:
 
     .. math::
+
         \log \mathcal{L}(\Theta) = \sum_i \left[\log p(\Theta|d_i) - \log p(n|d_i)\right]
-   
+
     This class provides boiler-plate methods and attributes for evaluating the
     log likelihood ratio, log prior, and log likelihood. This class
     makes no assumption about the detectors' noise model :math:`n`. As such,
-    the methods for computing these values raise `NotImplementedError`s. These
+    the methods for computing these values raise ``NotImplementedErrors``. These
     functions need to be monkey patched, or other classes that inherit from
     this class need to define their own functions.
 
     Instances of this class can be called like a function. The default is for
-    this class to call its `logposterior` function, but this can be changed
-    with the `set_callfunc` method.
+    this class to call its ``logposterior`` function, but this can be changed
+    with the ``set_callfunc`` method.
 
     Parameters
     ----------
-    waveform_generator : generator class
-        A generator class that creates waveforms. This must have a `generate`
-        function which takes parameter values as keyword arguments, a
-        detectors attribute which is a dictionary of detectors keyed by their
-        names, and an epoch which specifies the start time of the generated
-        waveform.
-    data : dict
+    variable_args : (tuple of) string(s)
+        A tuple of parameter names that will be varied.
+    waveform_generator : generator class, optional
+        A generator class that creates waveforms.
+    data : dict, optional
         A dictionary of data, in which the keys are the detector names and the
-        values are the data (assumed to be unwhitened). The list of keys must
-        match the waveform generator's detectors keys, and the epoch of every
-        data set must be the same as the waveform generator's epoch.
-    prior : callable
+        values are the data.
+    prior : callable, optional
         A callable class or function that computes the log of the prior. If
-        None provided, will use `_noprior`, which returns 0 for all parameter
+        None provided, will use ``_noprior``, which returns 0 for all parameter
         values.
     sampling_parameters : list, optional
         Replace one or more of the variable args with the given parameters
         for sampling.
     replace_parameters : list, optional
         The variable args to replace with sampling parameters. Must be the
-        same length as `sampling_parameters`.
+        same length as ``sampling_parameters``.
     sampling_transforms : list, optional
         List of transforms to use to go between the variable args and the
-        sampling parameters. Required if `sampling_parameters` is not None.
+        sampling parameters. Required if ``sampling_parameters`` is not None.
+    waveform_transforms : list, optional
+        List of transforms to use to go from the variable args to parameters
+        understood by the waveform generator.
 
     Attributes
     ----------
@@ -137,9 +138,9 @@ class _BaseLikelihoodEvaluator(object):
     lognl : {None, float}
         The log of the noise likelihood summed over the number of detectors.
     return_meta : {True, bool}
-        If True, `prior`, `logposterior`, and `logplr` will return the value
-        of the prior, the loglikelihood ratio, and the log jacobian, along with
-        the posterior/plr.
+        If True, ``prior``, ``logposterior``, and ``logplr`` will return the
+        value of the prior, the loglikelihood ratio, and the log jacobian,
+        along with the posterior/plr.
 
     Methods
     -------
@@ -166,42 +167,36 @@ class _BaseLikelihoodEvaluator(object):
         Set the function to use when the class is called as a function.
     """
     name = None
+    required_kwargs = []
 
-    def __init__(self, waveform_generator, data, prior=None,
+    def __init__(self, variable_args,
+                 waveform_generator=None, data=None, prior=None,
                  sampling_parameters=None, replace_parameters=None,
-                 sampling_transforms=None,
+                 sampling_transforms=None, waveform_transforms=None,
                  return_meta=True):
+        if isinstance(variable_args, str) or isinstance(variable_args, unicode):
+            variable_args = (variable_args,)
+        if not isinstance(variable_args, tuple):
+            variable_args = tuple(variable_args)
+        self._variable_args = variable_args
+        # store data, waveform generator
         self._waveform_generator = waveform_generator
-        # we'll store a copy of the data which we'll later whiten in place
-        self._data = dict([[ifo, 1*data[ifo]] for ifo in data])
-        # check that the data and waveform generator have the same detectors
-        if sorted(waveform_generator.detectors.keys()) != \
-                sorted(self._data.keys()):
-            raise ValueError("waveform generator's detectors (%s) " %(
-                ','.join(sorted(waveform_generator.detector_names))) +
-                "does not match data (%s)" %(
-                ','.join(sorted(self._data.keys()))))
-        # check that the data and waveform generator have the same epoch
-        if any(waveform_generator.epoch != d.epoch
-               for d in self._data.values()):
-            raise ValueError("waveform generator does not have the same epoch "
-                "as all of the data sets.")
-        # check that the data sets all have the same lengths
-        dlens = numpy.array([len(d) for d in data.values()])
-        if not all(dlens == dlens[0]):
-            raise ValueError("all data must be of the same length")
+        # we'll store a copy of the data
+        if data is not None:
+            self._data = dict([[ifo, 1*data[ifo]] for ifo in data])
+        else:
+            self._data = None
         # store prior
         if prior is None:
             self._prior = _NoPrior()
         else:
             # check that the variable args of the prior evaluator is the same
             # as the waveform generator
-            if prior.variable_args != self._waveform_generator.variable_args:
+            if prior.variable_args != variable_args:
                 raise ValueError("variable args of prior and waveform "
                     "generator do not match")
             self._prior = prior
-        self._variable_args = self._waveform_generator.variable_args
-        # initialize the log nl to 0
+        # initialize the log nl to None
         self._lognl = None
         self.return_meta = return_meta
         # store sampling parameters and transforms
@@ -222,6 +217,12 @@ class _BaseLikelihoodEvaluator(object):
         else:
             self._sampling_args = self._variable_args
             self._sampling_transforms = None
+        self._waveform_transforms = waveform_transforms
+
+    @property
+    def variable_args(self):
+        """Returns the variable arguments."""
+        return self._variable_args
 
     @property
     def waveform_generator(self):
@@ -229,9 +230,9 @@ class _BaseLikelihoodEvaluator(object):
         return self._waveform_generator
 
     @property
-    def variable_args(self):
-        """Returns the variable arguments."""
-        return self._variable_args
+    def data(self):
+        """Returns the data that was set."""
+        return self._data
 
     @property
     def sampling_args(self):
@@ -246,7 +247,7 @@ class _BaseLikelihoodEvaluator(object):
     def apply_sampling_transforms(self, samples, inverse=False):
         """Applies the sampling transforms to the given samples.
 
-        If `sampling_transforms` is None, just returns the samples.
+        If ``sampling_transforms`` is None, just returns the samples.
 
         Parameters
         ----------
@@ -268,11 +269,6 @@ class _BaseLikelihoodEvaluator(object):
                                                  inverse=inverse)
 
     @property
-    def data(self):
-        """Returns the data that was set."""
-        return self._data
-
-    @property
     def lognl(self):
         """Returns the log of the noise likelihood."""
         return self._lognl
@@ -283,12 +279,13 @@ class _BaseLikelihoodEvaluator(object):
 
     def logjacobian(self, **params):
         r"""Returns the log of the jacobian needed to transform pdfs in the
-        `variable_args` parameter space to the `sampling_args` parameter space.
+        ``variable_args`` parameter space to the ``sampling_args`` parameter
+        space.
 
         Let :math:`\mathbf{x}` be the set of variable parameters,
         :math:`\mathbf{y} = f(\mathbf{x})` the set of sampling parameters, and
         :math:`p_x(\mathbf{x})` a probability density function defined over
-        :math:`mathbf{x}`. The corresponding pdf in :math:`\mathbf{y}` is then:
+        :math:`\mathbf{x}`. The corresponding pdf in :math:`\mathbf{y}` is then:
 
         .. math::
 
@@ -334,7 +331,7 @@ class _BaseLikelihoodEvaluator(object):
     def prior_rvs(self, size=1, prior=None):
         """Returns random variates drawn from the prior.
 
-        If the `sampling_args` are different from the `variable_args`, the
+        If the ``sampling_args`` are different from the ``variable_args``, the
         variates are transformed to the `sampling_args` parameter space before
         being returned.
 
@@ -342,7 +339,7 @@ class _BaseLikelihoodEvaluator(object):
         ----------
         size : int, optional
             Number of random values to return for each parameter. Default is 1.
-        prior : PriorEvaluator, optional
+        prior : JointDistribution, optional
             Use the given prior to draw values rather than the saved prior.
 
         Returns
@@ -371,8 +368,7 @@ class _BaseLikelihoodEvaluator(object):
     def loglr(self, **params):
         """Returns the natural log of the likelihood ratio.
         """
-        raise NotImplementedError("Likelihood ratio function not set.")
-
+        return self.loglikelihood(**params) - self.lognl
 
     # the names and order of data returned by _formatreturn when
     # return_metadata is True
@@ -467,42 +463,212 @@ class _BaseLikelihoodEvaluator(object):
             variable args.
         callfunc : str, optional
             The name of the function to call. If None, will use
-            `self._callfunc`. Default is None.
+            ``self._callfunc``. Default is None.
 
         Returns
         -------
         float or tuple :
-            If `return_meta` is False, the output of the call function. If
-            `return_meta` is True, a tuple of the output of the call function
+            If ``return_meta`` is False, the output of the call function. If
+            ``return_meta`` is True, a tuple of the output of the call function
             and the meta data.
         """
         params = dict(zip(self._sampling_args, params))
         # apply inverse transforms to go from sampling parameters to
         # variable args
         params = self.apply_sampling_transforms(params, inverse=True)
+        # apply boundary conditions
+        params = self._prior.apply_boundary_conditions(**params)
+        # apply waveform transforms
+        if self._waveform_transforms is not None:
+            params = pycbc.transforms.apply_transforms(params,
+                                                 self._waveform_transforms,
+                                                 inverse=False)
         # apply any boundary conditions to the parameters before
         # generating/evaluating
         if callfunc is not None:
             f = getattr(self, callfunc)
         else:
             f = self._callfunc
-        return f(**self._prior.apply_boundary_conditions(**params))
+        return f(**params)
 
     __call__ = evaluate
 
 
+#
+# =============================================================================
+#
+#                              Test distributions
+#
+# =============================================================================
+#
+class TestNormal(BaseLikelihoodEvaluator):
+    r"""The test distribution is an multi-variate normal distribution.
 
-class GaussianLikelihood(_BaseLikelihoodEvaluator):
-    r"""Computes log likelihoods assuming the detectors' noise is Gaussian.
+    The number of dimensions is set by the number of ``variable_args`` that are
+    passed. For details on the distribution used, see
+    ``scipy.stats.multivariate_normal``.
 
-    With Gaussian noise the log likelihood functions for signal
-    :math:`\log p(d|\Theta)` and for noise :math:`log p(d|n)` are given by:
+    Parameters
+    ----------
+    variable_args : (tuple of) string(s)
+        A tuple of parameter names that will be varied.
+    mean : array-like, optional
+        The mean values of the parameters. If None provide, will use 0 for all
+        parameters.
+    cov : array-like, optional
+        The covariance matrix of the parameters. If None provided, will use
+        unit variance for all parameters, with cross-terms set to 0.
+    \**kwargs :
+        All other keyword arguments are passed to ``BaseLikelihoodEvaluator``.
+
+    """
+    name = "test_normal"
+
+    def __init__(self, variable_args, mean=None, cov=None, **kwargs):
+        # set up base likelihood parameters
+        super(TestNormal, self).__init__(variable_args, **kwargs)
+        # set the lognl to 0 since there is no data
+        self.set_lognl(0.)
+        # store the pdf
+        if mean is None:
+            mean = [0.]*len(variable_args)
+        if cov is None:
+            cov = [1.]*len(variable_args)
+        self._dist = stats.multivariate_normal(mean=mean, cov=cov)
+        # check that the dimension is correct
+        if self._dist.dim != len(variable_args):
+            raise ValueError("dimension mis-match between variable_args and "
+                             "mean and/or cov")
+
+    def loglikelihood(self, **params):
+        """Returns the log pdf of the multivariate normal.
+        """
+        return self._dist.logpdf([params[p] for p in self.variable_args])
+
+class TestEggbox(BaseLikelihoodEvaluator):
+    r"""The test distribution is an 'eggbox' function:
 
     .. math::
 
-        \log p(d|\Theta) = -\frac{1}{2} \sum_i \left<h_i(\Theta) - d_i | h_i(\Theta - d_i\right>
+        \log \mathcal{L}(\Theta) = \left[2+\prod_{i=1}^{n}\cos\left(\frac{\theta_{i}}{2}\right)\right]^{5}
 
-        \log p(d|n) = -\frac{1}{2} \sum_i \left<d_i | d_i\right>
+    The number of dimensions is set by the number of ``variable_args`` that are
+    passed.
+
+    Parameters
+    ----------
+    variable_args : (tuple of) string(s)
+        A tuple of parameter names that will be varied.
+    \**kwargs :
+        All other keyword arguments are passed to ``BaseLikelihoodEvaluator``.
+
+    """
+    name = "test_eggbox"
+
+    def __init__(self, variable_args, **kwargs):
+        # set up base likelihood parameters
+        super(TestEggbox, self).__init__(variable_args, **kwargs)
+
+        # set the lognl to 0 since there is no data
+        self.set_lognl(0.)
+
+    def loglikelihood(self, **params):
+        """Returns the log pdf of the eggbox function.
+        """
+        return (2 + numpy.prod(numpy.cos([params[p]/2. for p in
+                                          self.variable_args])))**5
+
+class TestRosenbrock(BaseLikelihoodEvaluator):
+    r"""The test distribution is the Rosenbrock function:
+
+    .. math::
+
+        \log \mathcal{L}(\Theta) = -\sum_{i=1}^{n-1}[(1-\theta_{i})^{2}+100(\theta_{i+1} - \theta_{i}^{2})^{2}]
+
+    The number of dimensions is set by the number of ``variable_args`` that are
+    passed.
+
+    Parameters
+    ----------
+    variable_args : (tuple of) string(s)
+        A tuple of parameter names that will be varied.
+    \**kwargs :
+        All other keyword arguments are passed to ``BaseLikelihoodEvaluator``.
+
+    """
+    name = "test_rosenbrock"
+
+    def __init__(self, variable_args, **kwargs):
+        # set up base likelihood parameters
+        super(TestRosenbrock, self).__init__(variable_args, **kwargs)
+
+        # set the lognl to 0 since there is no data
+        self.set_lognl(0.)
+
+    def loglikelihood(self, **params):
+        """Returns the log pdf of the Rosenbrock function.
+        """
+        l = 0
+        p = [params[p] for p in self.variable_args]
+        for i in range(len(p) - 1):
+            l -= ((1 - p[i])**2 + 100 * (p[i+1] - p[i]**2)**2)
+        return l
+
+class TestVolcano(BaseLikelihoodEvaluator):
+    r"""The test distribution is a two-dimensional 'volcano' function:
+
+    .. math::
+        \Theta = \sqrt{\theta_{1}^{2} + \theta_{2}^{2}}
+        \log \mathcal{L}(\Theta) = 25(e^{\frac{-\Theta}{35}} + \frac{1}{2\sqrt{2\pi}} e^{-\frac{(\Theta-5)^{2}}{8}})
+
+    Parameters
+    ----------
+    variable_args : (tuple of) string(s)
+        A tuple of parameter names that will be varied. Must have length 2.
+    \**kwargs :
+        All other keyword arguments are passed to ``BaseLikelihoodEvaluator``.
+
+    """
+    name = "test_volcano"
+
+    def __init__(self, variable_args, **kwargs):
+        # set up base likelihood parameters
+        super(TestVolcano, self).__init__(variable_args, **kwargs)
+
+        # make sure there are exactly two variable args
+        if len(self.variable_args) != 2:
+            raise ValueError("TestVolcano distribution requires exactly "
+                             "two variable args")
+
+        # set the lognl to 0 since there is no data
+        self.set_lognl(0.)
+
+    def loglikelihood(self, **params):
+        """Returns the log pdf of the 2D volcano function.
+        """
+        p = [params[p] for p in self.variable_args]
+        r = numpy.sqrt(p[0]**2 + p[1]**2)
+        mu, sigma = 5.0, 2.0
+        return 25 * (numpy.exp(-r/35) + 1 / (sigma * numpy.sqrt(2 * numpy.pi)) \
+                     * numpy.exp(-0.5 * ((r - mu) / sigma) ** 2))
+
+#
+# =============================================================================
+#
+#                              Data-based likelihoods
+#
+# =============================================================================
+#
+class GaussianLikelihood(BaseLikelihoodEvaluator):
+    r"""Computes log likelihoods assuming the detectors' noise is Gaussian.
+
+    With Gaussian noise the log likelihood functions for signal
+    :math:`\log p(d|\Theta)` and for noise :math:`\log p(d|n)` are given by:
+
+    .. math::
+
+        \log p(d|\Theta) &= -\frac{1}{2} \sum_i \left<h_i(\Theta) - d_i | h_i(\Theta) - d_i\right> \\
+        \log p(d|n) &= -\frac{1}{2} \sum_i \left<d_i | d_i\right>
 
     where the sum is over the number of detectors, :math:`d_i` is the data in
     each detector, and :math:`h_i(\Theta)` is the model signal in each
@@ -513,7 +679,7 @@ class GaussianLikelihood(_BaseLikelihoodEvaluator):
         \left<a | b\right> = 4\Re \int_{0}^{\infty} \frac{\tilde{a}(f) \tilde{b}(f)}{S_n(f)} \mathrm{d}f,
 
     where :math:`S_n(f)` is the PSD in the given detector.
-    
+
     Note that the log prior-weighted likelihood ratio has one less term
     than the log posterior, since the :math:`\left<d_i|d_i\right>` term cancels
     in the likelihood ratio:
@@ -522,31 +688,33 @@ class GaussianLikelihood(_BaseLikelihoodEvaluator):
 
         \log \hat{\mathcal{L}} = \log p(\Theta) + \sum_i \left[ \left<h_i(\Theta)|d_i\right> - \frac{1}{2} \left<h_i(\Theta)|h_i(\Theta)\right> \right]
 
-    For this reason, by default this class returns `logplr` when called as a
-    function instead of `logposterior`. This can be changed via the
-    `set_callfunc` method.
+    For this reason, by default this class returns ``logplr`` when called as a
+    function instead of ``logposterior``. This can be changed via the
+    ``set_callfunc`` method.
 
     Upon initialization, the data is whitened using the given PSDs. If no PSDs
     are given the data and waveforms returned by the waveform generator are
     assumed to be whitened. The likelihood function of the noise,
-    
+
     .. math::
-    
+
         p(d|n) = \frac{1}{2} \sum_i \left<d_i|d_i\right>,
 
     is computed on initialization and stored as the `lognl` attribute.
-    
+
     By default, the data is assumed to be equally sampled in frequency, but
     unequally sampled data can be supported by passing the appropriate
-    normalization using the `norm` keyword argument.
+    normalization using the ``norm`` keyword argument.
 
     For more details on initialization parameters and definition of terms, see
-    `_BaseLikelihoodEvaluator`.
+    ``BaseLikelihoodEvaluator``.
 
     Parameters
     ----------
+    variable_args : (tuple of) string(s)
+        A tuple of parameter names that will be varied.
     waveform_generator : generator class
-        A generator class that creates waveforms. This must have a `generate`
+        A generator class that creates waveforms. This must have a ``generate``
         function which takes parameter values as keyword arguments, a
         detectors attribute which is a dictionary of detectors keyed by their
         names, and an epoch which specifies the start time of the generated
@@ -569,28 +737,28 @@ class GaussianLikelihood(_BaseLikelihoodEvaluator):
         and a given waveform will be used.
     norm : {None, float or array}
         An extra normalization weight to apply to the inner products. Can be
-        either a float or an array. If `None`, `4*data.values()[0].delta_f`
+        either a float or an array. If ``None``, ``4*data.values()[0].delta_f``
         will be used.
-    prior : callable
-        A callable class or function that computes the prior.
-    return_meta : {True, bool}
-        If True, `logposterior` and `logplr` will return the value of the
-        prior and the loglikelihood ratio, along with the posterior/plr.
+    \**kwargs :
+        All other keyword arguments are passed to ``BaseLikelihoodEvaluator``.
 
     Examples
     --------
     Create a signal, and set up the likelihood evaluator on that signal:
 
+    >>> from pycbc import psd as pypsd
+    >>> from pycbc.waveform.generator import FDomainDetFrameGenerator, FDomainCBCGenerator
+    >>> from pycbc import inference
     >>> seglen = 4
     >>> sample_rate = 2048
     >>> N = seglen*sample_rate/2+1
     >>> fmin = 30.
     >>> m1, m2, s1z, s2z, tsig, ra, dec, pol, dist = 38.6, 29.3, 0., 0., 3.1, 1.37, -1.26, 2.76, 3*500.
-    >>> generator = waveform.FDomainDetFrameGenerator(waveform.FDomainCBCGenerator, 0., variable_args=['tc'], detectors=['H1', 'L1'], delta_f=1./seglen, f_lower=fmin, approximant='SEOBNRv2_ROM_DoubleSpin', mass1=m1, mass2=m2, spin1z=s1z, spin2z=s2z, ra=ra, dec=dec, polarization=pol, distance=dist)
+    >>> generator = FDomainDetFrameGenerator(FDomainCBCGenerator, 0., variable_args=['tc'], detectors=['H1', 'L1'], delta_f=1./seglen, f_lower=fmin, approximant='SEOBNRv2_ROM_DoubleSpin', mass1=m1, mass2=m2, spin1z=s1z, spin2z=s2z, ra=ra, dec=dec, polarization=pol, distance=dist)
     >>> signal = generator.generate(tc=tsig)
     >>> psd = pypsd.aLIGOZeroDetHighPower(N, 1./seglen, 20.)
     >>> psds = {'H1': psd, 'L1': psd}
-    >>> likelihood_eval = inference.GaussianLikelihood(generator, signal, fmin, psds=psds, return_meta=False)
+    >>> likelihood_eval = inference.GaussianLikelihood(['tc'], generator, signal, fmin, psds=psds, return_meta=False)
 
     Now compute the log likelihood ratio and prior-weighted likelihood ratio;
     since we have not provided a prior, these should be equal to each other:
@@ -612,7 +780,7 @@ class GaussianLikelihood(_BaseLikelihoodEvaluator):
     Using the same likelihood evaluator, evaluate the log prior-weighted
     likelihood ratio at several points in time, check that the max is at tsig,
     and plot (note that we use the class as a function here, which defaults
-    to calling `logplr`):
+    to calling ``logplr``):
 
     >>> from matplotlib import pyplot
     >>> times = numpy.arange(seglen*sample_rate)/float(sample_rate)
@@ -624,28 +792,50 @@ class GaussianLikelihood(_BaseLikelihoodEvaluator):
         [<matplotlib.lines.Line2D at 0x1274b5c50>]
     >>> fig.show()
 
-    Create a prior and use it (see prior module for more details):
+    Create a prior and use it (see distributions module for more details):
 
-    >>> from pycbc.inference import prior
-    >>> uniform_prior = prior.Uniform(tc=(tsig-0.2,tsig+0.2))
-    >>> prior_eval = prior.PriorEvaluator(['tc'], uniform_prior)
+    >>> from pycbc import distributions
+    >>> uniform_prior = distributions.Uniform(tc=(tsig-0.2,tsig+0.2))
+    >>> prior_eval = inference.JointDistribution(['tc'], uniform_prior)
     >>> likelihood_eval = inference.GaussianLikelihood(generator, signal, 20., psds=psds, prior=prior_eval, return_meta=False)
     >>> likelihood_eval.logplr([tsig]), likelihood_eval.logposterior([tsig])
         (ArrayWithAligned(278.84574353071264), ArrayWithAligned(0.9162907318741418))
 
     """
     name = 'gaussian'
+    required_kwargs = ['waveform_generator', 'data', 'f_lower']
 
-    def __init__(self, waveform_generator, data, f_lower, psds=None,
-                 f_upper=None, norm=None, prior=None,
-                 sampling_parameters=None, replace_parameters=None,
-                 sampling_transforms=None, return_meta=True):
+    def __init__(self, variable_args, waveform_generator=None, data=None,
+                 f_lower=None, psds=None, f_upper=None, norm=None,
+                 **kwargs):
+        if waveform_generator is None:
+            raise ValueError("waveform_generator must be provided")
+        if data is None:
+            raise ValueError("data must be provided")
+        if f_lower is None:
+            raise ValueError("f_lower must be provided")
         # set up the boiler-plate attributes; note: we'll compute the
         # log evidence later
-        super(GaussianLikelihood, self).__init__(waveform_generator, data,
-            prior=prior, sampling_parameters=sampling_parameters,
-            replace_parameters=replace_parameters,
-            sampling_transforms=sampling_transforms, return_meta=return_meta)
+        super(GaussianLikelihood, self).__init__(
+            variable_args,
+            waveform_generator=waveform_generator, data=data,
+            **kwargs)
+        # check that the data and waveform generator have the same detectors
+        if sorted(waveform_generator.detectors.keys()) != \
+                sorted(self._data.keys()):
+            raise ValueError("waveform generator's detectors (%s) " %(
+                ','.join(sorted(waveform_generator.detector_names))) +
+                "does not match data (%s)" %(
+                ','.join(sorted(self._data.keys()))))
+        # check that the data and waveform generator have the same epoch
+        if any(waveform_generator.epoch != d.epoch
+               for d in self._data.values()):
+            raise ValueError("waveform generator does not have the same epoch "
+                "as all of the data sets.")
+        # check that the data sets all have the same lengths
+        dlens = numpy.array([len(d) for d in data.values()])
+        if not all(dlens == dlens[0]):
+            raise ValueError("all data must be of the same length")
         # we'll use the first data set for setting values
         d = data.values()[0]
         N = len(d)
@@ -659,7 +849,7 @@ class GaussianLikelihood(_BaseLikelihoodEvaluator):
         # we'll store the weight to apply to the inner product
         if psds is None:
             w = Array(numpy.sqrt(norm)*numpy.ones(N))
-            self._weight = {det: w for det in data} 
+            self._weight = {det: w for det in data}
         else:
             # temporarily suppress numpy divide by 0 warning
             numpysettings = numpy.seterr(divide='ignore')
@@ -676,15 +866,11 @@ class GaussianLikelihood(_BaseLikelihoodEvaluator):
         # set default call function to logplor
         self.set_callfunc('logplr')
 
-    @property
-    def lognl(self):
-        return self._lognl
-
     def loglr(self, **params):
         r"""Computes the log likelihood ratio,
-        
+
         .. math::
-            
+
             \log \mathcal{L}(\Theta) = \sum_i \left<h_i(\Theta)|d_i\right> - \frac{1}{2}\left<h_i(\Theta)|h_i(\Theta)\right>,
 
         at the given point in parameter space :math:`\Theta`.
@@ -725,9 +911,9 @@ class GaussianLikelihood(_BaseLikelihoodEvaluator):
 
     def loglikelihood(self, **params):
         r"""Computes the log likelihood of the paramaters,
-        
+
         .. math::
-        
+
             p(d|\Theta) = -\frac{1}{2}\sum_i \left<h_i(\Theta) - d_i | h_i(\Theta) - d_i\right>
 
         Parameters
@@ -762,7 +948,7 @@ class GaussianLikelihood(_BaseLikelihoodEvaluator):
             The value of the log-posterior evaluated at the given point in
             parameter space.
         metadata : tuple
-            If `return_meta`, the prior and likelihood ratio as a tuple.
+            If ``return_meta``, the prior and likelihood ratio as a tuple.
             Otherwise, just returns the log-posterior.
         """
         # since the logplr has fewer terms, we'll call that, then just add
@@ -775,7 +961,12 @@ class GaussianLikelihood(_BaseLikelihoodEvaluator):
         return self._formatreturn(logplr + self._lognl, prior=pr, loglr=lr,
                                   logjacobian=lj)
 
-likelihood_evaluators = {GaussianLikelihood.name: GaussianLikelihood}
 
-__all__ = ['_BaseLikelihoodEvaluator', 'GaussianLikelihood',
-           'likelihood_evaluators']
+likelihood_evaluators = {TestEggbox.name: TestEggbox,
+                         TestNormal.name: TestNormal,
+                         TestRosenbrock.name: TestRosenbrock,
+                         TestVolcano.name: TestVolcano,
+                         GaussianLikelihood.name: GaussianLikelihood}
+
+__all__ = ['BaseLikelihoodEvaluator', 'TestNormal', 'TestEggbox', 'TestVolcano',
+           'TestRosenbrock', 'GaussianLikelihood', 'likelihood_evaluators']

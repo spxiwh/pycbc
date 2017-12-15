@@ -174,7 +174,7 @@ def _mass2_from_mchirp_mass1(mchirp, mass1):
 
     .. math::
         m_2^3 - a(m_2 + m_1) = 0,
- 
+
     where
 
     .. math::
@@ -284,7 +284,7 @@ def _a0(f_lower):
 def _a3(f_lower):
     """Another parameter used for chirp times"""
     return numpy.pi / (8. * (numpy.pi * f_lower)**(5./3.))
-  
+
 
 def tau0_from_mtotal_eta(mtotal, eta, f_lower):
     r"""Returns :math:`\tau_0` from the total mass, symmetric mass ratio, and
@@ -338,7 +338,7 @@ def eta_from_tau0_tau3(tau0, tau3, f_lower):
                                    in_seconds=True)
     eta = mtotal**(-2./3.) * (_a3(f_lower) / tau3)
     return eta
-    
+
 
 def mass1_from_tau0_tau3(tau0, tau3, f_lower):
     r"""Returns the primary mass from the given :math:`\tau_0, \tau_3`."""
@@ -353,6 +353,24 @@ def mass2_from_tau0_tau3(tau0, tau3, f_lower):
     eta = eta_from_tau0_tau3(tau0, tau3, f_lower)
     return mass2_from_mtotal_eta(mtotal, eta)
 
+def lambda_tilde(mass1, mass2, lambda1, lambda2):
+    """ The effective lambda parameter
+
+    The mass-weighted dominant effective lambda parameter defined in
+    https://journals.aps.org/prd/pdf/10.1103/PhysRevD.91.043002
+    """
+    m1 = _ensurearray(mass1)
+    m2 = _ensurearray(mass2)
+
+    lsum = _ensurearray(lambda1 + lambda2)
+    ldiff = _ensurearray(lambda1 - lambda2)
+    mask = m1 < m2
+    ldiff[mask] = -ldiff[mask]
+
+    eta = eta_from_mass1_mass2(m1, m2)
+    p1 = (lsum) * (1 + 7. * eta - 31 * eta ** 2.0)
+    p2 = (1 - 4 * eta)**0.5 * (1 + 9 * eta - 11 * eta ** 2.0) * (ldiff)
+    return _formatreturn(8.0 / 13.0 * (p1 + p2))
 
 #
 # =============================================================================
@@ -389,13 +407,13 @@ def phi_a(mass1, mass2, spin1x, spin1y, spin2x, spin2y):
                                 primary_spin(mass1, mass2, spin1y, spin2y))
     phi2 = phi_from_spinx_spiny(secondary_spin(mass1, mass2, spin1x, spin2x),
                                 secondary_spin(mass1, mass2, spin1y, spin2y))
-    return phi1 - phi2
+    return (phi1 - phi2) % (2 * numpy.pi)
 
 def phi_s(spin1x, spin1y, spin2x, spin2y):
     """ Returns the sum of the in-plane perpendicular spins."""
     phi1 = phi_from_spinx_spiny(spin1x, spin1y)
     phi2 = phi_from_spinx_spiny(spin2x, spin2y)
-    return phi1 + phi2
+    return (phi1 + phi2) % (2 * numpy.pi)
 
 def primary_spin(mass1, mass2, spin1, spin2):
     """Returns the dimensionless spin of the primary mass."""
@@ -495,17 +513,18 @@ def phi2_from_phi_a_phi_s(phi_a, phi_s):
 def phi_from_spinx_spiny(spinx, spiny):
     """Returns the angle between the x-component axis and the in-plane spin.
     """
-    return numpy.arctan(spiny / spinx)
+    phi = numpy.arctan2(spiny, spinx)
+    return phi % (2 * numpy.pi)
 
 def spin1z_from_mass1_mass2_chi_eff_chi_a(mass1, mass2, chi_eff, chi_a):
     """Returns spin1z.
     """
-    return (mass1 + mass2) / (2 * mass1) * (chi_eff - chi_a)
+    return (mass1 + mass2) / (2.0 * mass1) * (chi_eff - chi_a)
 
 def spin2z_from_mass1_mass2_chi_eff_chi_a(mass1, mass2, chi_eff, chi_a):
     """Returns spin2z.
     """
-    return (mass1 + mass2) / (2 * mass2) * (chi_eff + chi_a)
+    return (mass1 + mass2) / (2.0 * mass2) * (chi_eff + chi_a)
 
 def spin1x_from_xi1_phi_a_phi_s(xi1, phi_a, phi_s):
     """Returns x-component spin for primary mass.
@@ -533,6 +552,27 @@ def spin2y_from_mass1_mass2_xi2_phi_a_phi_s(mass1, mass2, xi2, phi_a, phi_s):
     phi2 = phi2_from_phi_a_phi_s(phi_a, phi_s)
     return chi_perp * numpy.sin(phi2)
 
+def dquadmon_from_lambda(lambdav):
+    r"""Return the quadrupole moment of a neutron star given its lambda
+
+    We use the relations defined here. https://arxiv.org/pdf/1302.4499.pdf.
+    Note that the convention we use is that:
+
+    .. math::
+
+        \mathrm{dquadmon} = \bar{Q} - 1.
+
+    Where :math:`\bar{Q}` (dimensionless) is the reduced quadrupole moment.
+    """
+    ll = numpy.log(lambdav)
+    ai = .194
+    bi = .0936
+    ci = 0.0474
+    di = -4.21 * 10**-3.0
+    ei = 1.23 * 10**-4.0
+    ln_quad_moment = ai + bi*ll + ci*ll**2.0 + di*ll**3.0 + ei*ll**4.0
+    return numpy.exp(ln_quad_moment) - 1
+
 #
 # =============================================================================
 #
@@ -541,14 +581,19 @@ def spin2y_from_mass1_mass2_xi2_phi_a_phi_s(mass1, mass2, xi2, phi_a, phi_s):
 # =============================================================================
 #
 def chirp_distance(dist, mchirp, ref_mass=1.4):
-    """Returns the chirp distance given a distance and chirp mass.
+    """Returns the chirp distance given the luminosity distance and chirp mass.
     """
     return dist * (2.**(-1./5) * ref_mass / mchirp)**(5./6)
+
+def distance_from_chirp_distance_mchirp(chirp_distance, mchirp, ref_mass=1.4):
+    """Returns the luminosity distance given a chirp distance and chirp mass.
+    """
+    return chirp_distance * (2.**(-1./5) * ref_mass / mchirp)**(-5./6)
 
 
 def _det_tc(detector_name, ra, dec, tc, ref_frame='geocentric'):
     """Returns the coalescence time of a signal in the given detector.
-    
+
     Parameters
     ----------
     detector_name : string
@@ -613,7 +658,7 @@ def snr_from_loglr(loglr):
     return snrs
 
 
-__all__ = ['primary_mass', 'secondary_mass', 'mtotal_from_mass1_mass2',
+__all__ = ['dquadmon_from_lambda', 'lambda_tilde', 'primary_mass', 'secondary_mass', 'mtotal_from_mass1_mass2',
            'q_from_mass1_mass2', 'invq_from_mass1_mass2',
            'eta_from_mass1_mass2', 'mchirp_from_mass1_mass2',
            'mass1_from_mtotal_q', 'mass2_from_mtotal_q',

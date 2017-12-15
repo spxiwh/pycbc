@@ -19,11 +19,16 @@ export LAL_DATA_PATH=$HOME/build/pycbc-sources/test
 
 RESULT=0
 
+# force reinstall of numpy to link with OpenBLAS if it exists
+# this is needed for test_inference.py
+pip uninstall -y numpy
+pip install -r requirements.txt
+
 # Using python setup.py test has two issues:
 #     Some tests fail for reasons not necessarily related to PyCBC
 #     Setup.py seems to returns 0 even when tests fail
 # So we rather run specific tests manually
-for prog in `find test -name '*.py' -print | egrep -v '(autochisq|bankveto|fft|schemes|long|lalsim|test_waveform)'`
+for prog in `find test -name '*.py' -print | egrep -v '(long|lalsim|test_waveform)'`
 do 
     echo -e ">> [`date`] running unit test for $prog"
     python $prog &> $LOG_FILE
@@ -54,6 +59,16 @@ do
         echo -e "    Pass."
     fi
 done
+
+# Run Inference Scripts
+./tools/inference_test.sh
+if test $? -ne 0 ; then
+    RESULT=1
+    echo -e "    FAILED!"
+    echo -e "---------------------------------------------------------"
+else
+    echo -e "    Pass."
+fi
 
 echo -e "\\n>> [`date`] Building documentation"
 

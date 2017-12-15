@@ -89,6 +89,7 @@ use_pycbc_pyinstaller_hooks=true
 build_onefile_bundles=false
 run_analysis=true
 silent_build=false
+lal_pulsar="--enable-lalpulsar"
 
 if echo ".$WORKSPACE" | grep CYGWIN64_FRONTEND >/dev/null; then
     # hack to use the script as a frontend for a Cygwin build slave for a Jenkins job
@@ -119,6 +120,8 @@ elif test ".$1" = ".--force-debian4" ||
     link_gcc_version=4.8.5
     gcc_path="/usr/local/bin"
     build_ssl=true
+    pyssl_from="pip-install"
+    build_python=true
     pyinstaller_lsb="--no-lsb"
     $pyinstaller21_hacks || build_subprocess32=true
     build_onefile_bundles=true
@@ -148,13 +151,33 @@ elif grep -q "Scientific Linux CERN SLC release 6" /etc/redhat-release 2>/dev/nu
     build_lapack=false
     build_freetype=false
     build_zlib=false
+    lal_pulsar="--disable-lal-pulsar"
     build_wrapper=false
     build_fstab=false
     pyinstaller_lsb="--no-lsb"
     build_onefile_bundles=true
     appendix="_Linux64"
-elif grep -q "Ubuntu 12" /etc/issue 2>/dev/null; then
+elif grep -q "Ubuntu 12" /etc/issue 2>/dev/null ; then
     link_gcc_version=4.6
+    gcc_path="/usr/bin"
+    build_python=true
+    build_pcre=true
+    pyinstaller_lsb="--no-lsb"
+    build_onefile_bundles=false
+    appendix="_Linux64"
+    if test x$TRAVIS_OS_NAME = xlinux ; then
+        build_fftw=false
+        build_hdf5=false
+        build_ssl=false
+        build_lapack=false
+        build_gsl=false
+        build_freetype=false
+        build_zlib=false
+        build_wrapper=false
+        build_fstab=false
+    fi
+elif grep -q "Ubuntu 14" /etc/issue 2>/dev/null ; then
+    link_gcc_version=4.8
     gcc_path="/usr/bin"
     build_python=true
     build_pcre=true
@@ -366,7 +389,9 @@ if [ ".$link_gcc_version" != "." ]; then
                 if test -x "${gcc_path}/$i-$link_gcc_version"; then
                     ln -s "${gcc_path}/$i-$link_gcc_version" $i
                 else
-                    echo ERROR; "${gcc_path}/$i-$link_gcc_version" not found
+                    echo ERROR: "${gcc_path}/$i-$link_gcc_version" not found
+                    ls -l ${gcc_path}/${i}-*
+                    exit 1
                 fi
         done
     )
@@ -446,11 +471,15 @@ else # if $BUILDDIRNAME-preinst.tgz
 
     # OpenSSL
     if $build_ssl; then
-    # p=openssl-1.0.2e # compile error on pyOpenSSL 0.13:
-    # pycbc/include/openssl/x509.h:751: note: previous declaration X509_REVOKED_ was here
-	p=openssl-1.0.1p
+        # use 1.0.1p for pyOpenSSL 0.13
+	if [ "$pyssl_from" = "tarball" ] ; then
+	    p=openssl-1.0.1p
+	else
+	    p=openssl-1.0.2l
+	fi
 	echo -e "\\n\\n>> [`date`] building $p" >&3
-	test -r $p.tar.gz || wget $wget_opts $aei/$p.tar.gz
+	test -r $p.tar.gz || wget $wget_opts $aei/$p.tar.gz ||
+	    wget $wget_opts https://www.openssl.org/source/$p.tar.gz
 	rm -rf $p
 	tar -xzvf $p.tar.gz  &&
 	cd $p &&
@@ -475,12 +504,17 @@ else # if $BUILDDIRNAME-preinst.tgz
 	make install
 	cd ..
 	$cleanup && rm -rf $p
+	hash -r
 	python -m ensurepip
+	hash -r
 	echo -e "\\n\\n>> [`date`] pip install --upgrade pip" >&3
 	pip install --upgrade pip
 	echo -e "\\n\\n>> [`date`] pip install virtualenv" >&3
 	pip install virtualenv
     fi
+
+    echo -e "\\n\\n>> [`date`] make sure dbhash and shelve exist" >&3
+    python -c "import dbhash, shelve"
 
     # set up virtual environment
     unset PYTHONPATH
@@ -491,10 +525,7 @@ else # if $BUILDDIRNAME-preinst.tgz
     export PYTHONPATH="$PREFIX/lib/python2.7/site-packages:$PYTHONPATH"
 
     # pyOpenSSL-0.13
-    if [ "$pyssl_from" = "pip-install" ] ; then
-	echo -e "\\n\\n>> [`date`] pip install pyOpenSSL==0.13" >&3
-	pip install pyOpenSSL==0.13
-    else
+    if [ "$pyssl_from" = "tarball" ] ; then
 	p=pyOpenSSL-0.13
 	echo -e "\\n\\n>> [`date`] building $p" >&3
 	test -r $p.tar.gz || wget $wget_opts "$pypi/source/p/pyOpenSSL/$p.tar.gz"
@@ -507,6 +538,9 @@ else # if $BUILDDIRNAME-preinst.tgz
 	python setup.py install --prefix="$PREFIX"
 	cd ..
 	$cleanup && rm -rf $p
+    else
+	echo -e "\\n\\n>> [`date`] pip install pyOpenSSL" >&3
+	pip install pyOpenSSL
     fi
 
     # LAPACK & BLAS
@@ -546,9 +580,6 @@ else # if $BUILDDIRNAME-preinst.tgz
 
     echo -e "\\n\\n>> [`date`] pip install nose, Cython-0.23.2" >&3
     pip install nose Cython==0.23.2
-
-    echo -e "\\n\\n>> [`date`] make sure dbhash and shelve exist" >&3
-    python -c "import dbhash, shelve"
 
     # SCIPY
     if [ "$scipy_from" = "pip-install" ] ; then
@@ -806,7 +837,7 @@ else
     # LALSUITE
     if [ ".$no_lalsuite_update" != "." ]; then
         echo -e "\\n\\n>> [`date`] Not updating lalsuite" >&3
-	cd lalsuite
+        cd lalsuite
     elif test -d lalsuite/.git; then
         echo -e "\\n\\n>> [`date`] Updating lalsuite" >&3
         cd lalsuite
@@ -824,7 +855,7 @@ else
         fi
     else
         echo -e "\\n\\n>> [`date`] Cloning lalsuite" >&3
-        git clone git://versions.ligo.org/lalsuite.git
+        git clone https://git.ligo.org/lscsoft/lalsuite-archive.git lalsuite
         cd lalsuite
         git remote add gitlab $gitlab/lalsuite.git
         if [ ".$lalsuite_branch" != "." ]; then
@@ -886,7 +917,7 @@ EOF
     cd lalsuite-build
     echo -e "\\n\\n>> [`date`] Configuring lalsuite" >&3
     ../lalsuite/configure CPPFLAGS="$lal_cppflags $CPPFLAGS" --disable-gcc-flags $shared $static --prefix="$PREFIX" --disable-silent-rules \
-        --disable-all-lal --enable-lalframe --enable-lalmetaio --enable-lalsimulation --enable-lalinspiral --enable-lalpulsar --enable-swig-python
+        --disable-all-lal --enable-lalframe --enable-lalmetaio --enable-lalsimulation --enable-lalinspiral ${lal_pulsar} --enable-swig-python
     if $build_dlls; then
 	echo '#include "/usr/include/stdlib.h"
 extern int setenv(const char *name, const char *value, int overwrite);
@@ -1359,7 +1390,7 @@ for (( i=0; i<${n_runs}; i++ ))
 do
     rm -f H1-INSPIRAL-OUT.hdf
     echo "\
->> [`date`] pycbc_inspiral using
+>> [`date`] Running pycbc_inspiral using
 >>   --bank-file ${bank_array[$i]}
 >>   --approximant ${approx_array[$i]}
 >>   ROM data from $lal_data_path"

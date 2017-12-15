@@ -11,7 +11,7 @@ else
 fi
 
 # set the lalsuite checkout to use
-LALSUITE_CODE="--lalsuite-commit=539c8700af92eb6dd00e0e91b9dbaf5bae51f004"
+LALSUITE_CODE="--lalsuite-commit=8cbd1b7187ce3ed9a825d6ed11cc432f3cfde9a5"
 
 echo -e "\\n>> [`date`] Ubuntu build"
 
@@ -47,8 +47,27 @@ pip install --upgrade pip setuptools
 # needed by mock 
 pip install 'setuptools==18.2' --upgrade
 
+# FIXME this is a fix for https://github.com/travis-ci/travis-ci/issues/7940
+# as Pegasus pulls in boto which hits this issue
+export BOTO_CONFIG=/dev/null
+
 # install pegasus
-pip install http://download.pegasus.isi.edu/pegasus/4.7.4/pegasus-python-source-4.7.4.tar.gz
+
+# FIXME this is a workaround for a bug in psycopg2 2.6 (required by pegasus)
+# see e.g. https://stackoverflow.com/questions/47044854/error-installing-psycopg2-2-6-2
+echo -e "Trying to get rid of pg_config"
+sudo apt-get -y purge libpq-dev
+echo -e "Making sure it is really gone..."
+if [ -n "`which pg_config`" ]
+then
+    echo -e "...still here:"
+    which pg_config
+    sudo rm -f `which pg_config`
+else
+    echo -e "...seems gone"
+fi
+
+pip install http://download.pegasus.isi.edu/pegasus/4.7.5/pegasus-python-source-4.7.5.tar.gz
 
 # install M2Crypto
 SWIG_FEATURES="-cpperraswarn -includeall -I/usr/include/openssl" pip install M2Crypto

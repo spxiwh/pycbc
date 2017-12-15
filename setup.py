@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (C) 2012 Alex Nitz, Andrew Miller, Josh Willis
+# Copyright (C) 2012 Alex Nitz, Duncan Brown, Andrew Miller, Josh Willis
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms of the GNU General Public License as published by the
@@ -23,7 +23,12 @@ from __future__ import print_function
 
 import os, fnmatch, sys, subprocess, shutil
 
-from trace import fullmodname
+# FIXME: trace.fullmodname was undocumented in Python 2 and actually became an
+# internal function in Python 3. We should not depend on it.
+try:
+    from trace import fullmodname
+except ImportError:
+    from trace import _fullmodname as fullmodname
 
 try:
     from setuptools.command.install import install as _install
@@ -62,18 +67,19 @@ install_requires =  setup_requires + ['Mako>=1.0.1',
                       'weave>=0.16.0',
                       'unittest2',
                       'matplotlib>=1.3.1',
-                      'numpy>=1.6.4',
+                      'numpy>=1.9.0',
                       'pillow',
                       'h5py>=2.5',
                       'jinja2',
                       'mpld3>=0.3',
                       'pyRXP>=2.1.0',
                       'pycbc-glue-obsolete==1.1.0',
-                      'kombine==0.8.1',
-                      'emcee>=2.2.0',
+                      'kombine>=0.8.2',
+                      'emcee==2.2.1',
                       'corner>=2.0.1',
                       'requests>=1.2.1',
-                      'beautifulsoup4>=4.6.0'
+                      'beautifulsoup4>=4.6.0',
+                      'astropy>=2.0.1'
                       ]
 
 #FIXME Remove me when we bump to h5py > 2.5
@@ -270,8 +276,9 @@ def get_version_info():
 
     # If this is a release or another kind of source distribution of PyCBC
     except:
-        version = '1.7.5'
-        release = 'True'
+        version = '1.9.0dev'
+        release = 'False'
+
         date = hash = branch = tag = author = committer = status = builder = build_date = ''
 
         with open('pycbc/version.py', 'w') as f:
@@ -342,6 +349,7 @@ setup (
     name = 'PyCBC',
     version = VERSION,
     description = 'Analyze gravitational-wave data, find signals, and study their parameters.',
+    long_description = open('descr.rst').read(),
     author = 'Ligo Virgo Collaboration - PyCBC team',
     author_email = 'alex.nitz@ligo.org',
     url = 'https://ligo-cbc.github.io',
@@ -362,6 +370,7 @@ setup (
                'bin/minifollowups/pycbc_page_snglinfo',
                'bin/minifollowups/pycbc_plot_trigger_timeseries',
                'bin/pycbc_banksim',
+               'bin/pycbc_banksim_skymax',
                'bin/pycbc_banksim_combine_banks',
                'bin/pycbc_banksim_match_combine',
                'bin/pycbc_faithsim',
@@ -435,6 +444,7 @@ setup (
                'bin/hdfcoinc/pycbc_fit_sngls_by_template',
                'bin/hdfcoinc/pycbc_fit_sngls_over_param',
                'bin/hdfcoinc/pycbc_fit_sngls_binned',
+               'bin/hdfcoinc/pycbc_template_recovery_hist',
                'bin/hwinj/pycbc_generate_hwinj',
                'bin/hwinj/pycbc_generate_hwinj_from_xml',
                'bin/hwinj/pycbc_plot_hwinj',
@@ -447,12 +457,15 @@ setup (
                'bin/pycbc_condition_strain',
                'bin/workflows/pycbc_make_inference_workflow',
                'bin/inference/pycbc_inference',
+               'bin/inference/pycbc_inference_extract_samples',
                'bin/inference/pycbc_inference_plot_acceptance_rate',
                'bin/inference/pycbc_inference_plot_acf',
                'bin/inference/pycbc_inference_plot_acl',
                'bin/inference/pycbc_inference_plot_geweke',
                'bin/inference/pycbc_inference_plot_gelman_rubin',
+               'bin/inference/pycbc_inference_plot_inj_recovery',
                'bin/inference/pycbc_inference_plot_movie',
+               'bin/inference/pycbc_inference_plot_inj_intervals',
                'bin/inference/pycbc_inference_plot_posterior',
                'bin/inference/pycbc_inference_plot_prior',
                'bin/inference/pycbc_inference_plot_samples',
@@ -472,6 +485,7 @@ setup (
                ],
     packages = [
                'pycbc',
+               'pycbc.calibration',
                'pycbc.distributions',
                'pycbc.fft',
                'pycbc.types',
@@ -488,6 +502,7 @@ setup (
                'pycbc.inference',
                'pycbc.inject',
                'pycbc.frame',
+               'pycbc.catalog',
                ],
      package_data = {'pycbc.workflow': find_package_data('pycbc/workflow'),
 	             'pycbc.results': find_package_data('pycbc/results'),

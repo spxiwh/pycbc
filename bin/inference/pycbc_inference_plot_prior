@@ -16,12 +16,12 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
+import matplotlib as mpl; mpl.use("Agg")
+import matplotlib.pyplot as plt
 import argparse
 import corner
 import itertools
 import logging
-import matplotlib as mpl; mpl.use("Agg")
-import matplotlib.pyplot as plt
 import numpy
 import sys
 from pycbc import distributions
@@ -94,7 +94,7 @@ variable_args = sorted(variable_args)
 ndim = len(variable_args)
 
 # construct class that will return draws from the prior
-prior = inference.PriorEvaluator(variable_args, *dists)
+prior = distributions.JointDistribution(variable_args, *dists)
 
 # get all points in space to calculate PDF
 logging.info("Getting grid of points")
