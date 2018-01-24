@@ -9,7 +9,7 @@
 # WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
 # Public License for more details.
-#
+
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
@@ -32,7 +32,7 @@ import pycbc.tmpltbank
 import pycbc.psd
 import pycbc.pnutils
 from pycbc import pnutils
-from pycbc.types import Array
+from pycbc.types import Array, FrequencySeries
 from pycbc.filter import match
 from pycbc.waveform import get_fd_waveform
 from six.moves import range
@@ -41,6 +41,7 @@ import sys
 import matplotlib
 matplotlib.use('Agg')
 import pylab
+import lal, lalsimulation
 
 import unittest
 from utils import parse_args_cpu_only, simple_exit
@@ -357,7 +358,7 @@ class TmpltbankTestClass(unittest.TestCase):
             self.assertTrue(not (abs(spin2z) > 0.5).any(), msg=errMsg)
             self.assertTrue((abs(spin1z) > 0.5).any(), msg=errMsg)
 
-    def test_metric_match_prediction(self):
+    def test_metric_match_prediction_1(self):
         mass1a, mass2a, spin1za, spin2za = \
                  pycbc.tmpltbank.get_random_mass(10, self.massRangeParams)
         mass1b, mass2b, spin1zb, spin2zb = \
@@ -393,6 +394,192 @@ class TmpltbankTestClass(unittest.TestCase):
             overlap, _ = match(htilde1, htilde2, psd=self.psd_for_match,
                             low_frequency_cutoff=15)
             self.assertTrue(overlap > 0.97 and overlap < 0.985)
+            print overlap, "TESTING"
+
+
+    def test_metric_match_prediction_3(self):
+        mass1a, mass2a, spin1za, spin2za = \
+                 pycbc.tmpltbank.get_random_mass(10, self.massRangeParams)
+        mass1b, mass2b, spin1zb, spin2zb = \
+                 pycbc.tmpltbank.get_random_mass(10, self.massRangeParams)
+        for idx in range(10):
+            masses1 = [mass1a[idx], mass2a[idx], spin1za[idx], spin2za[idx]]
+            masses2 = [mass1b[idx], mass2b[idx], spin1zb[idx], spin2zb[idx]]
+            dist, _, _ = pycbc.tmpltbank.get_point_distance \
+                (masses1,  masses2, self.metricParams, self.f_upper)
+            opt_dist = 0.02
+            while dist > opt_dist * 1.01  or dist < opt_dist * 0.99:
+                dist_fac = opt_dist / dist
+                dist_fac = dist_fac**0.5
+                if dist_fac < 0.01:
+                    dist_fac = 0.01
+                if dist_fac > 2:
+                    dist_fac = 2
+                for idx, curr_mass2 in enumerate(masses2):
+                    masses2[idx] = masses1[idx] + \
+                        (curr_mass2 - masses1[idx]) * dist_fac
+                dist, _, _ = pycbc.tmpltbank.get_point_distance \
+                    (masses1,  masses2, self.metricParams, self.f_upper)
+            self.assertFalse(numpy.isnan(dist))
+
+            htilde1, _ = get_fd_waveform\
+                (approximant='TaylorF2', mass1=masses1[0], mass2=masses1[1],
+                 spin1z=masses1[2], spin2z=masses1[3], delta_f=1.0/256,
+                 f_lower=15, f_final=2000)
+            htilde2, _ = get_fd_waveform\
+                (approximant='TaylorF2', mass1=masses2[0], mass2=masses2[1],
+                 spin1z=masses2[2], spin2z=masses2[3], delta_f=1.0/256,
+                 f_lower=15, f_final=2000)
+            overlap, _ = match(htilde1, htilde2, psd=self.psd_for_match,
+                            low_frequency_cutoff=15)
+            self.assertTrue(overlap > 0.97 and overlap < 0.985)
+            print overlap, "TESTING"
+
+    def test_metric_match_prediction_2(self):
+        laldict = lal.CreateDict()
+        mass1s, mass2s, spin1zs, spin2zs = \
+                 pycbc.tmpltbank.get_random_mass(5, self.massRangeParams)
+        freqs = numpy.arange(2048*256) * 1./256.
+        fs = lal.CreateREAL8Vector(2048 * 256)
+        fs.data[:] = freqs[:]
+
+        for i in range(len(mass1s)):
+            mass1 = mass1s[i]
+            mass2 = mass2s[i]
+            spin1z = spin1zs[i]
+            spin2z = spin2zs[i]
+            phasing = lalsimulation.SimInspiralTaylorF2AlignedPhasing\
+                (mass1, mass2, spin1z, spin2z, laldict)
+            wform1 = lalsimulation.SimInspiralTaylorF2Core\
+                (fs, 0., mass1*lal.MSUN_SI, mass2*lal.MSUN_SI, 80., 0.,
+                 lal.PC_SI*1000000, laldict, phasing)
+            wform1 = FrequencySeries(wform1.data.data[:], delta_f=1./256.,
+                                     epoch=wform1.epoch)
+            metric_size = len(self.metricParams.evals[self.f_upper])
+
+            # Diagonal terms
+            for metric_idx in range(metric_size):
+                diff = ((1 - 0.97) / self.metricParams.metric[self.f_upper]\
+                        [metric_idx,metric_idx])**0.5
+                new_phasing = pycbc.tmpltbank.shift_lal_phasing_by_delta_lambda\
+                    (phasing, diff, metric_idx, mass1 + mass2,
+                     self.metricParams)
+                wform2 = lalsimulation.SimInspiralTaylorF2Core\
+                    (fs, 0., mass1*lal.MSUN_SI, mass2*lal.MSUN_SI, 80., 0.,
+                     lal.PC_SI*1000000, laldict, new_phasing)
+                wform2 = FrequencySeries(wform2.data.data[:], delta_f=1./256.,
+                                         epoch=wform1.epoch)
+                overlap, _ = match(wform1, wform2, psd=self.psd_for_match,
+                                    low_frequency_cutoff=15)
+                self.metricParams.metric[self.f_upper][metric_idx,metric_idx] \
+                    = (1 - overlap) / (diff*diff)
+                print metric_idx, metric_idx, overlap, mass1, mass2
+
+            # Cross terms
+            for metric_idx1 in range(metric_size):
+                for metric_idx2 in range(metric_size):
+                    if metric_idx2 >= metric_idx1:
+                        continue
+                    curr_metric_1 = self.metricParams.metric[self.f_upper]\
+                        [metric_idx1, metric_idx1]
+                    curr_metric_2 = self.metricParams.metric[self.f_upper]\
+                        [metric_idx2, metric_idx2]
+                    curr_metric_C = self.metricParams.metric[self.f_upper]\
+                        [metric_idx1, metric_idx2]
+                    diff_ratio = (curr_metric_2 / curr_metric_1)**0.5
+                    diff1 = 1 - 0.97
+                    diff1 /= curr_metric_1 + 2*diff_ratio*curr_metric_C + \
+                        diff_ratio*diff_ratio*curr_metric_2
+                    if diff1 < 0:
+                        diff1 = 1 - 0.97
+                        diff1 /= curr_metric_1 + \
+                            diff_ratio*diff_ratio*curr_metric_2
+                    diff1 = diff1**0.5
+                    diff2 = diff_ratio * diff1
+                    new_phasing = \
+                        pycbc.tmpltbank.shift_lal_phasing_by_delta_lambda\
+                        (phasing, diff1, metric_idx1, mass1 + mass2,
+                         self.metricParams)
+                    new_phasing = \
+                        pycbc.tmpltbank.shift_lal_phasing_by_delta_lambda\
+                        (new_phasing, diff2, metric_idx2, mass1 + mass2,
+                         self.metricParams, edit_in_place=True)
+                    wform2 = lalsimulation.SimInspiralTaylorF2Core\
+                    (fs, 0., mass1*lal.MSUN_SI, mass2*lal.MSUN_SI, 80., 0.,
+                     lal.PC_SI*1000000, laldict, new_phasing)
+                    wform2 = FrequencySeries\
+                        (wform2.data.data[:], delta_f=1./256.,
+                         epoch=wform1.epoch)
+                    overlap, _ = match(wform1, wform2, psd=self.psd_for_match,
+                                       low_frequency_cutoff=15)
+                    new_metric_comp = - curr_metric_1 / diff_ratio - \
+                        diff_ratio * curr_metric_2 + \
+                        (1 - overlap) / (diff1 * diff2)
+                    new_metric_comp *= 0.5
+                    self.metricParams.metric[self.f_upper]\
+                        [metric_idx1,metric_idx2] = new_metric_comp
+                    self.metricParams.metric[self.f_upper]\
+                        [metric_idx2,metric_idx1] = new_metric_comp
+                    print metric_idx1, metric_idx2, overlap, mass1, mass2
+
+        evals,evecs = numpy.linalg.eig(self.metricParams.metric[self.f_upper])
+        # Numerical error can lead to small negative eigenvalues.
+        for i in xrange(len(evals)):
+            if evals[i] < 0:
+                # Due to numerical imprecision the very small eigenvalues can
+                # be negative. Make these positive.
+                evals[i] = -evals[i]
+            if evecs[i,i] < 0:
+                # We demand a convention that all diagonal terms in the matrix
+                # of eigenvalues are positive.
+                # This is done to help visualization of the spaces (increasing
+                # mchirp always goes the same way)
+                evecs[:,i] = - evecs[:,i]
+        self.metricParams.evals[self.f_upper] = evals
+        self.metricParams.evecs[self.f_upper] = evecs
+        vals=pycbc.tmpltbank.estimate_mass_range\
+            (100000, self.massRangeParams, self.metricParams, self.f_upper,
+             covary=False)
+        cov = numpy.cov(vals)
+        _,self.evecsCV = numpy.linalg.eig(cov)
+        self.metricParams.evecsCV[self.f_upper] = self.evecsCV
+
+        mass1a, mass2a, spin1za, spin2za = \
+                 pycbc.tmpltbank.get_random_mass(10, self.massRangeParams)
+        mass1b, mass2b, spin1zb, spin2zb = \
+                 pycbc.tmpltbank.get_random_mass(10, self.massRangeParams)
+        for idx in range(10):
+            masses1 = [mass1a[idx], mass2a[idx], spin1za[idx], spin2za[idx]]
+            masses2 = [mass1b[idx], mass2b[idx], spin1zb[idx], spin2zb[idx]]
+            dist, _, _ = pycbc.tmpltbank.get_point_distance \
+                (masses1,  masses2, self.metricParams, self.f_upper)
+            opt_dist = 0.02
+            while dist > opt_dist * 1.01  or dist < opt_dist * 0.99:
+                dist_fac = opt_dist / dist
+                dist_fac = dist_fac**0.5
+                if dist_fac < 0.01:
+                    dist_fac = 0.01
+                if dist_fac > 2:
+                    dist_fac = 2
+                for idx, curr_mass2 in enumerate(masses2):
+                    masses2[idx] = masses1[idx] + \
+                        (curr_mass2 - masses1[idx]) * dist_fac
+                dist, _, _ = pycbc.tmpltbank.get_point_distance \
+                    (masses1,  masses2, self.metricParams, self.f_upper)
+            self.assertFalse(numpy.isnan(dist))
+
+            htilde1, _ = get_fd_waveform\
+                (approximant='TaylorF2', mass1=masses1[0], mass2=masses1[1],
+                 spin1z=masses1[2], spin2z=masses1[3], delta_f=1.0/256,
+                 f_lower=15, f_final=2000)
+            htilde2, _ = get_fd_waveform\
+                (approximant='TaylorF2', mass1=masses2[0], mass2=masses2[1],
+                 spin1z=masses2[2], spin2z=masses2[3], delta_f=1.0/256,
+                 f_lower=15, f_final=2000)
+            overlap, _ = match(htilde1, htilde2, psd=self.psd_for_match,
+                            low_frequency_cutoff=15)
+            self.assertTrue(overlap > 0.97 and overlap < 0.985)
+            print overlap, "TESTING"
 
 
     def test_chirp_params(self):
