@@ -436,9 +436,48 @@ class TmpltbankTestClass(unittest.TestCase):
             print overlap, "TESTING"
 
     def test_metric_match_prediction_2(self):
+        mass1a, mass2a, spin1za, spin2za = \
+                 pycbc.tmpltbank.get_random_mass(10, self.massRangeParams)
+        mass1b, mass2b, spin1zb, spin2zb = \
+                 pycbc.tmpltbank.get_random_mass(10, self.massRangeParams)
+        for idx in range(10):
+            masses1 = [mass1a[idx], mass2a[idx], spin1za[idx], spin2za[idx]]
+            masses2 = [mass1b[idx], mass2b[idx], spin1zb[idx], spin2zb[idx]]
+            dist, _, _ = pycbc.tmpltbank.get_point_distance \
+                (masses1,  masses2, self.metricParams, self.f_upper)
+            opt_dist = 0.02
+            while dist > opt_dist * 1.01  or dist < opt_dist * 0.99:
+                dist_fac = opt_dist / dist
+                dist_fac = dist_fac**0.5
+                if dist_fac < 0.01:
+                    dist_fac = 0.01
+                if dist_fac > 2:
+                    dist_fac = 2
+                for idx, curr_mass2 in enumerate(masses2):
+                    masses2[idx] = masses1[idx] + \
+                        (curr_mass2 - masses1[idx]) * dist_fac
+                dist, _, _ = pycbc.tmpltbank.get_point_distance \
+                    (masses1,  masses2, self.metricParams, self.f_upper)
+            self.assertFalse(numpy.isnan(dist))
+
+            htilde1, _ = get_fd_waveform\
+                (approximant='TaylorF2', mass1=masses1[0], mass2=masses1[1],
+                 spin1z=masses1[2], spin2z=masses1[3], delta_f=1.0/256,
+                 f_lower=15, f_final=2000)
+            htilde2, _ = get_fd_waveform\
+                (approximant='TaylorF2', mass1=masses2[0], mass2=masses2[1],
+                 spin1z=masses2[2], spin2z=masses2[3], delta_f=1.0/256,
+                 f_lower=15, f_final=2000)
+            overlap, _ = match(htilde1, htilde2, psd=self.psd_for_match,
+                            low_frequency_cutoff=15)
+            self.assertTrue(overlap > 0.97 and overlap < 0.985)
+            print overlap, "TESTING"
+
+        N_iterations = 10
         laldict = lal.CreateDict()
         mass1s, mass2s, spin1zs, spin2zs = \
-                 pycbc.tmpltbank.get_random_mass(5, self.massRangeParams)
+                 pycbc.tmpltbank.get_random_mass(N_iterations,
+                                                 self.massRangeParams)
         freqs = numpy.arange(2048*256) * 1./256.
         fs = lal.CreateREAL8Vector(2048 * 256)
         fs.data[:] = freqs[:]
@@ -475,6 +514,7 @@ class TmpltbankTestClass(unittest.TestCase):
                     = (1 - overlap) / (diff*diff)
                 print metric_idx, metric_idx, overlap, mass1, mass2
 
+            print
             # Cross terms
             for metric_idx1 in range(metric_size):
                 for metric_idx2 in range(metric_size):
@@ -486,7 +526,7 @@ class TmpltbankTestClass(unittest.TestCase):
                         [metric_idx2, metric_idx2]
                     curr_metric_C = self.metricParams.metric[self.f_upper]\
                         [metric_idx1, metric_idx2]
-                    diff_ratio = (curr_metric_2 / curr_metric_1)**0.5
+                    diff_ratio = (curr_metric_1 / curr_metric_2)**0.5
                     diff1 = 1 - 0.97
                     diff1 /= curr_metric_1 + 2*diff_ratio*curr_metric_C + \
                         diff_ratio*diff_ratio*curr_metric_2
@@ -495,7 +535,7 @@ class TmpltbankTestClass(unittest.TestCase):
                         diff1 /= curr_metric_1 + \
                             diff_ratio*diff_ratio*curr_metric_2
                     diff1 = diff1**0.5
-                    diff2 = diff_ratio * diff1
+                    diff2 = diff1 * diff_ratio
                     new_phasing = \
                         pycbc.tmpltbank.shift_lal_phasing_by_delta_lambda\
                         (phasing, diff1, metric_idx1, mass1 + mass2,
@@ -521,6 +561,8 @@ class TmpltbankTestClass(unittest.TestCase):
                     self.metricParams.metric[self.f_upper]\
                         [metric_idx2,metric_idx1] = new_metric_comp
                     print metric_idx1, metric_idx2, overlap, mass1, mass2
+                    print curr_metric_1*diff1*diff1, curr_metric_2*diff2*diff2, curr_metric_C*diff1*diff2, curr_metric_1*diff1*diff1 + curr_metric_2*diff2*diff2 + 2*curr_metric_C*diff1*diff2
+                    print
 
         evals,evecs = numpy.linalg.eig(self.metricParams.metric[self.f_upper])
         # Numerical error can lead to small negative eigenvalues.
@@ -544,10 +586,6 @@ class TmpltbankTestClass(unittest.TestCase):
         _,self.evecsCV = numpy.linalg.eig(cov)
         self.metricParams.evecsCV[self.f_upper] = self.evecsCV
 
-        mass1a, mass2a, spin1za, spin2za = \
-                 pycbc.tmpltbank.get_random_mass(10, self.massRangeParams)
-        mass1b, mass2b, spin1zb, spin2zb = \
-                 pycbc.tmpltbank.get_random_mass(10, self.massRangeParams)
         for idx in range(10):
             masses1 = [mass1a[idx], mass2a[idx], spin1za[idx], spin2za[idx]]
             masses2 = [mass1b[idx], mass2b[idx], spin1zb[idx], spin2zb[idx]]

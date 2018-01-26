@@ -482,7 +482,10 @@ def rotate_vector(evecs, old_vector, rescale_factor, index):
         temp += (evecs[i,index] * rescale_factor) * old_vector[i]
     return temp
 
-def get_point_distance(point1, point2, metricParams, fUpper):
+def get_point_distance(point1, point2, metricParams, fUpper,
+                       lambda1a=None, lambda2a=None, quadparam1a=None,
+                       quadparam2a=None, lambda1b=None, lambda2b=None,
+                       quadparam1b=None, quadparam2b=None):
     """
     Function to calculate the mismatch between two points, supplied in terms
     of the masses and spins, using the xi_i parameter space metric to
@@ -530,9 +533,13 @@ def get_point_distance(point1, point2, metricParams, fUpper):
     bSpin1 = point2[2]
     bSpin2 = point2[3]
 
-    aXis = get_cov_params(aMass1, aMass2, aSpin1, aSpin2, metricParams, fUpper)
+    aXis = get_cov_params(aMass1, aMass2, aSpin1, aSpin2, metricParams, fUpper,
+                          lambda1=lambda1a, lambda2=lambda2a,
+                          quadparam1=quadparam1a, quadparam2=quadparam2a)
 
-    bXis = get_cov_params(bMass1, bMass2, bSpin1, bSpin2, metricParams, fUpper)
+    bXis = get_cov_params(bMass1, bMass2, bSpin1, bSpin2, metricParams, fUpper,
+                          lambda1=lambda1b, lambda2=lambda2b,
+                          quadparam1=quadparam1b, quadparam2=quadparam2b)
 
     dist = (aXis[0] - bXis[0])**2
     for i in range(1,len(aXis)):
