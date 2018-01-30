@@ -481,8 +481,6 @@ cbc_intrinsic_params = ParameterList\
 
 # the parameters of a cbc in the radiation frame
 cbc_rframe_params = cbc_intrinsic_params + orientation_params
-cbc_rframe_params_full = cbc_intrinsic_params + orientation_params + \
-    cbc_optional_params
 
 # calibration parameters
 calibration_params = ParameterList([
@@ -506,26 +504,28 @@ common_gen_equal_sampled_params = ParameterList([f_lower]) + \
 # the following are parameters that can be used to generate an FD waveform
 fd_waveform_params = cbc_rframe_params + ParameterList([delta_f]) + \
     common_gen_equal_sampled_params + ParameterList([f_final, f_final_func])
-fd_waveform_params_full = fd_waveform_params + cbc_optional_params 
 
 # the following are parameters that can be used to generate a TD waveform
 td_waveform_params = cbc_rframe_params + ParameterList([delta_t]) + \
     common_gen_equal_sampled_params + ParameterList([numrel_data]) + \
     flags_generation_params
-td_waveform_params_full = td_waveform_params + cbc_optional_params
 
 # The following are the minimum set of parameters that are required to
 # generate a FD or TD waveform. All other parameters have some default value as
 # defined above. Defaults of None simply mean that the value is not passed into
 # the lal_dict structure and the waveform generator will take whatever default
 # behaviour
+<<<<<<< HEAD
 cbc_td_required = ParameterList([mass1, mass2, f_lower, delta_t, approximant])
 cbc_fd_required = ParameterList([mass1, mass2, f_lower, delta_f, approximant])
+=======
+cbc_td_required = ParameterList([mass1, mass2, delta_t, approximant])
+cbc_fd_required = ParameterList([mass1, mass2, delta_f, approximant])
+>>>>>>> dd724c5... Collin's suggestions
 
 # the following are parameters that can be used to generate a
 # frequency series waveform
 fd_waveform_sequence_params = cbc_rframe_params + \
     ParameterList([sample_points]) + common_generation_params + \
     flags_generation_params
-fd_waveform_sequence_params_full = fd_waveform_sequence_params + \
     cbc_optional_params
