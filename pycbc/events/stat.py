@@ -483,6 +483,27 @@ class PhaseTDExpFitSGStatistic(PhaseTDExpFitStatistic):
         PhaseTDExpFitStatistic.__init__(self, files)
         self.get_newsnr = get_newsnr_sgveto
 
+class NewSNRSGMLVetoStatistic(NewSNRSGStatistic):
+    def __init__(self, files):
+        super(NewSNRSGMLVetoStatistic, self).__init__(files)
+        self.single_dtype = [('snglstat', numpy.float32),
+                             ('ml_vetoed', numpy.bool)]
+
+    def single(self, trigs):
+        sngl_stat = super(NewSNRSGMLVetoStatistic, self).single(trigs)
+        sngls = numpy.zeros(len(sngl_stat), dtype=self.single_dtype)
+        sngls['snglstat'][:] = sngl_stat
+        sngls['ml_vetoed'][:] = trigs['ml_vetoed'][:]
+        return sngls
+
+    def coinc(self, s0, s1, slide, step):
+        cstat = super(NewSNRSGStatistic, self).coinc\
+            (s0['snglstat'], s1['snglstat'], slide, step)
+        lgc = s0['ml_vetoed'] | s1['ml_vetoed']
+        cstat[lgc] = 1E-5 * cstat[lgc]
+        return cstat
+
+
 class PhaseTDExpFitSGMLVetoStatistic(PhaseTDExpFitSGStatistic):
     def __init__(self, files):
         super(PhaseTDExpFitSGMLVetoStatistic, self).__init__(files)
@@ -537,7 +558,8 @@ statistic_dict = {
     'max_cont_trad_newsnr': MaxContTradNewSNRStatistic,
     'phasetd_exp_fit_stat_sgveto': PhaseTDExpFitSGStatistic,
     'phasetd_exp_fit_stat_sgveto_mlveto': PhaseTDExpFitSGMLVetoStatistic,
-    'newsnr_sgveto': NewSNRSGStatistic
+    'newsnr_sgveto': NewSNRSGStatistic,
+    'newsnr_sgveto_mlveto': NewSNRSGMLVetoStatistic
 }
 
 def get_statistic(stat):
