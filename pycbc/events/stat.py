@@ -483,6 +483,13 @@ class PhaseTDExpFitSGStatistic(PhaseTDExpFitStatistic):
         PhaseTDExpFitStatistic.__init__(self, files)
         self.get_newsnr = get_newsnr_sgveto
 
+class NewSNRSGMLVetoSnglStatistic(NewSNRSGStatistic):
+    def single(self, trigs):
+        sngl_stat = super(NewSNRSGMLVetoSnglStatistic, self).single(trigs)
+        sngl_stat[trigs['ml_vetoed'][:]] = 0.
+        return sngl_stat
+
+
 class NewSNRSGMLVetoStatistic(NewSNRSGStatistic):
     def __init__(self, files):
         super(NewSNRSGMLVetoStatistic, self).__init__(files)
@@ -503,6 +510,25 @@ class NewSNRSGMLVetoStatistic(NewSNRSGStatistic):
         cstat[lgc] = 1E-5 * cstat[lgc]
         return cstat
 
+class ExpFitSGMLVetoStatistic(ExpFitCombinedSNR):
+    def __init__(self, files):
+        super(ExpFitCombinedSNR, self).__init__(files)
+        self.single_dtype = [('snglstat', numpy.float32),
+                             ('ml_vetoed', numpy.bool)]
+
+    def single(self, trigs):
+        sngl_stat = super(ExpFitCombinedSNR, self).single(trigs)
+        sngls = numpy.zeros(len(sngl_stat), dtype=self.single_dtype)
+        sngls['snglstat'][:] = sngl_stat
+        sngls['ml_vetoed'][:] = trigs['ml_vetoed'][:]
+        return sngls
+
+    def coinc(self, s0, s1, slide, step):
+        cstat = super(ExpFitCombinedSNR, self).coinc\
+            (s0['snglstat'], s1['snglstat'], slide, step)
+        lgc = s0['ml_vetoed'] | s1['ml_vetoed']
+        cstat[lgc] = 0.
+        return cstat
 
 class PhaseTDExpFitSGMLVetoStatistic(PhaseTDExpFitSGStatistic):
     def __init__(self, files):
@@ -559,8 +585,23 @@ statistic_dict = {
     'phasetd_exp_fit_stat_sgveto': PhaseTDExpFitSGStatistic,
     'phasetd_exp_fit_stat_sgveto_mlveto': PhaseTDExpFitSGMLVetoStatistic,
     'newsnr_sgveto': NewSNRSGStatistic,
-    'newsnr_sgveto_mlveto': NewSNRSGMLVetoStatistic
+    'newsnr_sgveto_mlveto': NewSNRSGMLVetoStatistic,
+    'newsnr_sgveto_mlveto_sngl': NewSNRSGMLVetoSnglStatistic,
+    'exp_fit_csnr_mlveto': ExpFitSGMLVetoStatistic
 }
+
+sngl_statistic_dict = {
+    'newsnr': NewSNRStatistic,
+    'new_snr': NewSNRStatistic,
+    'snr': NetworkSNRStatistic,
+    'newsnr_cut': NewSNRCutStatistic,
+    'exp_fit_csnr': ExpFitCombinedSNR,
+    'max_cont_trad_newsnr': MaxContTradNewSNRStatistic,
+    'newsnr_sgveto': NewSNRSGStatistic,
+    'newsnr_sgveto_mlveto_sngl': NewSNRSGMLVetoSnglStatistic,
+#    'exp_fit_csnr_mlveto_sngl': ExpFitSGMLVetoSnglStatistic
+}
+
 
 def get_statistic(stat):
     """
@@ -583,6 +624,30 @@ def get_statistic(stat):
     """
     try:
         return statistic_dict[stat]
+    except KeyError:
+        raise RuntimeError('%s is not an available detection statistic' % stat)
+
+def get_sngl_statistic(stat):
+    """
+    Error-handling sugar around dict lookup
+
+    Parameters
+    ----------
+    stat : string
+        Name of the statistic
+
+    Returns
+    -------
+    class
+        Subclass of Stat base class
+
+    Raises
+    ------
+    RuntimeError
+        If the string is not recognized as corresponding to a Stat subclass
+    """
+    try:
+        return sngl_statistic_dict[stat]
     except KeyError:
         raise RuntimeError('%s is not an available detection statistic' % stat)
 
