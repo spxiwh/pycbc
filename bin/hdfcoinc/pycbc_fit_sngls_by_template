@@ -20,13 +20,13 @@ import argparse, logging
 import copy, numpy as np
 
 from pycbc import io, events
-from pycbc.events import trigger_fits as trstats, sngl_statistic_dict
+from pycbc.events import trigger_fits as trstats, stat as pycbc_stats
 import pycbc.version
 
 #### DEFINITIONS AND FUNCTIONS ####
 
 def get_stat(statchoice, trigs):
-    stat_instance = sngl_statistic_dict[statchoice]([])
+    stat_instance = pycbc_stats.sngl_statistic_dict[statchoice]([])
     return stat_instance.single(trigs)
 #### MAIN ####
 
@@ -60,7 +60,7 @@ parser.add_argument("--fit-function",
                     choices=["exponential", "rayleigh", "power"],
                     help="Functional form for the maximum likelihood fit")
 parser.add_argument("--sngl-stat", default="new_snr",
-                    choices=sngl_statistic_dict.keys(),
+                    choices=pycbc_stats.sngl_statistic_dict.keys(),
                     help="Function of SNR and chisq to perform fits with")
 parser.add_argument("--stat-threshold", type=float,
                     help="Only fit triggers with statistic value above this "
@@ -268,8 +268,6 @@ if args.save_trig_param:
 outfile.attrs.create("ifo", data=args.ifo)
 outfile.attrs.create("fit_function", data=args.fit_function)
 outfile.attrs.create("sngl_stat", data=args.sngl_stat)
-if args.stat_factor:
-    outfile.attrs.create("stat_factor", data=args.stat_factor)
 if args.save_trig_param:
     outfile.attrs.create("save_trig_param", data=args.save_trig_param)
 outfile.attrs.create("stat_threshold", data=args.stat_threshold)

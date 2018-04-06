@@ -44,8 +44,8 @@ def get_newsnr(trigs):
     numpy.ndarray
         Array of newsnr values
     """
-    dof = 2. * trigs['chisq_dof'] - 2.
-    newsnr = events.newsnr(trigs['snr'], trigs['chisq'] / dof)
+    dof = 2. * trigs['chisq_dof'][:] - 2.
+    newsnr = events.newsnr(trigs['snr'][:], trigs['chisq'][:] / dof)
     return numpy.array(newsnr, ndmin=1, dtype=numpy.float32)
 
 def get_newsnr_sgveto(trigs):
@@ -63,8 +63,8 @@ def get_newsnr_sgveto(trigs):
     numpy.ndarray
         Array of newsnr values
     """
-    dof = 2. * trigs['chisq_dof'] - 2.
-    nsnr_sg = events.newsnr_sgveto(trigs['snr'], trigs['chisq'] / dof, trigs['sg_chisq'])
+    dof = 2. * trigs['chisq_dof'][:] - 2.
+    nsnr_sg = events.newsnr_sgveto(trigs['snr'][:], trigs['chisq'][:] / dof, trigs['sg_chisq'][:])
     return numpy.array(nsnr_sg, ndmin=1, dtype=numpy.float32)
 
 
@@ -179,7 +179,7 @@ class NewSNRCutStatistic(NewSNRStatistic):
             Array of single detector values
         """
         newsnr = get_newsnr(trigs)
-        rchisq = trigs['chisq'] / (2. * trigs['chisq_dof'] - 2.)
+        rchisq = trigs['chisq'][:] / (2. * trigs['chisq_dof'][:] - 2.)
         newsnr[numpy.logical_and(newsnr < 10, rchisq > 2)] = -1
         return newsnr
 
@@ -252,10 +252,10 @@ class PhaseTDStatistic(NewSNRStatistic):
         sngl_stat = get_newsnr(trigs)
         singles = numpy.zeros(len(sngl_stat), dtype=self.single_dtype)
         singles['snglstat'] = sngl_stat
-        singles['coa_phase'] = trigs['coa_phase']
-        singles['end_time'] = trigs['end_time']
-        singles['sigmasq'] = trigs['sigmasq']
-        singles['snr'] = trigs['snr']
+        singles['coa_phase'] = trigs['coa_phase'][:]
+        singles['end_time'] = trigs['end_time'][:]
+        singles['sigmasq'] = trigs['sigmasq'][:]
+        singles['snr'] = trigs['snr'][:]
         return numpy.array(singles, ndmin=1)
 
     def logsignalrate(self, s0, s1, slide, step):
@@ -456,10 +456,10 @@ class PhaseTDExpFitStatistic(PhaseTDStatistic, ExpFitCombinedSNR):
         sngl_stat = ExpFitCombinedSNR.single(self, trigs)
         singles = numpy.zeros(len(sngl_stat), dtype=self.single_dtype)
         singles['snglstat'] = sngl_stat
-        singles['coa_phase'] = trigs['coa_phase']
-        singles['end_time'] = trigs['end_time']
-        singles['sigmasq'] = trigs['sigmasq']
-        singles['snr'] = trigs['snr']
+        singles['coa_phase'] = trigs['coa_phase'][:]
+        singles['end_time'] = trigs['end_time'][:]
+        singles['sigmasq'] = trigs['sigmasq'][:]
+        singles['snr'] = trigs['snr'][:]
         return numpy.array(singles, ndmin=1)
 
     def coinc(self, s0, s1, slide, step):
@@ -567,8 +567,8 @@ class MaxContTradNewSNRStatistic(NewSNRStatistic):
             The array of single detector values
         """
         chisq_newsnr = get_newsnr(trigs)
-        rautochisq = trigs['cont_chisq'] / trigs['cont_chisq_dof']
-        autochisq_newsnr = events.newsnr(trigs['snr'], rautochisq)
+        rautochisq = trigs['cont_chisq'][:] / trigs['cont_chisq_dof'][:]
+        autochisq_newsnr = events.newsnr(trigs['snr'][:], rautochisq)
         return numpy.array(numpy.minimum(chisq_newsnr, autochisq_newsnr,
                            dtype=numpy.float32), ndmin=1, copy=False)
 

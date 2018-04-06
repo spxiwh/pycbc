@@ -26,7 +26,8 @@ import copy, numpy as np
 from scipy.stats import kstest
 
 from pycbc import io, events, bin_utils, results
-from pycbc.events import trigger_fits as trstats, sngl_statistic_dict
+from pycbc.events import trigger_fits as trstats
+from pycbc.events.stat import sngl_statistic_dict
 import pycbc.version
 
 #### DEFINITIONS AND FUNCTIONS ####
@@ -166,10 +167,10 @@ else:
 minth = min(args.stat_threshold)
 abovethresh = stat >= minth
 stat = stat[abovethresh]
-tid = trigf[args.ifo+'/template_id'][:][aboveminth][abovethresh]
-time = trigf[args.ifo+'/end_time'][:][aboveminth][abovethresh]
+tid = trigf[args.ifo+'/template_id'][:][abovethresh]
+time = trigf[args.ifo+'/end_time'][:][abovethresh]
 if trig_dur:
-    tdur = trigf[args.ifo+'/template_duration'][:][aboveminth][abovethresh]
+    tdur = trigf[args.ifo+'/template_duration'][:][abovethresh]
 logging.info('%i trigs left after thresholding at %f' % (len(stat), minth))
 
 # now do vetoing
