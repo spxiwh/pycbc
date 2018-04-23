@@ -504,7 +504,7 @@ class NewSNRSGMLVetoStatistic(NewSNRSGStatistic):
         return sngls
 
     def coinc(self, s0, s1, slide, step):
-        cstat = super(NewSNRSGStatistic, self).coinc\
+        cstat = super(NewSNRSGMLVetoStatistic, self).coinc\
             (s0['snglstat'], s1['snglstat'], slide, step)
         lgc = s0['ml_vetoed'] | s1['ml_vetoed']
         cstat[lgc] = 1E-5 * cstat[lgc]
@@ -512,19 +512,19 @@ class NewSNRSGMLVetoStatistic(NewSNRSGStatistic):
 
 class ExpFitSGMLVetoStatistic(ExpFitCombinedSNR):
     def __init__(self, files):
-        super(ExpFitCombinedSNR, self).__init__(files)
+        super(ExpFitSGMLVetoStatistic, self).__init__(files)
         self.single_dtype = [('snglstat', numpy.float32),
                              ('ml_vetoed', numpy.bool)]
 
     def single(self, trigs):
-        sngl_stat = super(ExpFitCombinedSNR, self).single(trigs)
+        sngl_stat = super(ExpFitSGMLVetoStatistic, self).single(trigs)
         sngls = numpy.zeros(len(sngl_stat), dtype=self.single_dtype)
         sngls['snglstat'][:] = sngl_stat
         sngls['ml_vetoed'][:] = trigs['ml_vetoed'][:]
         return sngls
 
     def coinc(self, s0, s1, slide, step):
-        cstat = super(ExpFitCombinedSNR, self).coinc\
+        cstat = super(ExpFitSGMLVetoStatistic, self).coinc\
             (s0['snglstat'], s1['snglstat'], slide, step)
         lgc = s0['ml_vetoed'] | s1['ml_vetoed']
         cstat[lgc] = 0.
