@@ -554,6 +554,79 @@ def spin2y_from_mass1_mass2_xi2_phi_a_phi_s(mass1, mass2, xi2, phi_a, phi_s):
     phi2 = phi2_from_phi_a_phi_s(phi_a, phi_s)
     return chi_perp * numpy.sin(phi2)
 
+#
+# =============================================================================
+#
+#                         Equation-of-state related functions
+#
+# =============================================================================
+#
+
+
+_lal_eos_names = ["ALF1", "ALF2", "ALF3", "ALF4", "AP1", "AP2", "AP3", "AP4",
+                  "BBB2", "BGN1H1", "BPAL12", "BSK19", "BSK20", "BSK21",
+                  "ENG", "FPS", "GNH3", "GS1", "GS2", "H1", "H2", "H3", "H4",
+                  "H5", "H6", "H7", "MPA1", "MS1B", "MS1", "MS2", "PAL6",
+                  "PCL2", "PS", "QMC700", "SLY4", "SLY", "SQM1", "SQM2",
+                  "SQM3", "WFF1", "WFF2", "WFF3"]
+
+
+def lambdas_dquadmons_termfreq_from_mass1_mass2_eos(mass1, mass2, eos):
+    """ADD DOCUMENTATION"""
+    import lal,lalsimulation
+    curr_eos = lalsimulation.SimNeutronStarEOSByName(eos)
+    eos_fam = lalsimulation.CreateSimNeutronStarFamily(curr_eos)
+    max_ns_mass = lalsimulation.SimNeutronStarMaximumMass(eos_fam)
+    max_ns_mass = self.max_ns_mass / lal.MSUN_SI
+    # Should be made to work for array inputs!!!
+    if mass1 < max_ns_mass * 0.999:
+        radius = lalsimulation.SimNeutronStarRadius(float(mass1) * lal.MSUN_SI,
+                                                    eos_fam)
+        k2_lovenumber = lalsimulation.SimNeutronStarLoveNumberK2\
+            (float(mass1) * lal.MSUN_SI, eos_fam)
+        lambda1 = (2./3. * k2_lovenumber * radius**5) /\
+            (mass1*lal.MRSUN_SI)**5.
+        dquadmon1 = dquadmon_from_lambda(lambda1)
+    else:
+        lambda1 = 0.
+        dquadmon1 = 0.
+
+    if mass2 < max_ns_mass * 0.999:
+        radius = lalsimulation.SimNeutronStarRadius(float(mass2) * lal.MSUN_SI,
+                                                    eos_fam)
+        k2_lovenumber = lalsimulation.SimNeutronStarLoveNumberK2\
+            (float(mass2) * lal.MSUN_SI, eos_fam)
+        lambda2 = (2./3. * k2_lovenumber * radius**5) /\
+            (mass22*lal.MRSUN_SI)**5.
+        dquadmon2 = dquadmon_from_lambda(lambda2)
+    else:
+        lambda2 = 0.
+        dquadmon2 = 0.
+
+    ffinal_isco = 1. / (6**(3./2.) * numpy.pi * (mass1+mass2)) 
+    if (lambda1 == 0) or (lambda2 == 0):
+        ffinal = ffinal_isco
+    else:
+        log_lmd1 = numpy.log(lamda1)
+        log_lmd2 = numpy.log(lamda2)
+        cness1 = 0.371 - 0.0391*log_lmd1 + 0.001056*log_lmd1*log_lmd1
+        cness2 = 0.371 - 0.0391*log_lmd2 + 0.001056*log_lmd2*log_lmd2
+        # Do we need to define the radius again? Tim's paper does use what is
+        # probably a slightly different convention, but could check this
+        radius1 = mass1 / cness1
+        radius2 = mass2 / cness2
+        ffinal_eos = 1. / numpy.pi * ((mass1 + mass2) /\
+            (radius1 + radius2)**3)**0.5 
+        ffinal = numpy.minimum(ffinal_isco, ffinal_eos)
+
+    return lambda1, lambda2, dquadmon1, dquadmon2, ffinal
+
+
+#def lambdas_dquadmons_from_mass1_mass2_eos(mass1, mass2, eos):
+#    """ADD DOCUMENTATION"""
+#    import lal,lalsimulation
+
+
 def dquadmon_from_lambda(lambdav):
     r"""Return the quadrupole moment of a neutron star given its lambda
 
