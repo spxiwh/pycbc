@@ -574,52 +574,79 @@ _lal_eos_names = ["ALF1", "ALF2", "ALF3", "ALF4", "AP1", "AP2", "AP3", "AP4",
 def lambdas_dquadmons_termfreq_from_mass1_mass2_eos(mass1, mass2, eos):
     """ADD DOCUMENTATION"""
     import lal,lalsimulation
+    mass1, ia1 = ensurearray(mass1)
+    mass2, ia2 = ensurearray(mass2)
+    input_is_array = ia1 or ia2
+    # We might want to cache this!
     curr_eos = lalsimulation.SimNeutronStarEOSByName(eos)
     eos_fam = lalsimulation.CreateSimNeutronStarFamily(curr_eos)
     max_ns_mass = lalsimulation.SimNeutronStarMaximumMass(eos_fam)
-    max_ns_mass = self.max_ns_mass / lal.MSUN_SI
-    # Should be made to work for array inputs!!!
-    if mass1 < max_ns_mass * 0.999:
-        radius = lalsimulation.SimNeutronStarRadius(float(mass1) * lal.MSUN_SI,
-                                                    eos_fam)
-        k2_lovenumber = lalsimulation.SimNeutronStarLoveNumberK2\
-            (float(mass1) * lal.MSUN_SI, eos_fam)
-        lambda1 = (2./3. * k2_lovenumber * radius**5) /\
-            (mass1*lal.MRSUN_SI)**5.
-        dquadmon1 = dquadmon_from_lambda(lambda1)
-    else:
-        lambda1 = 0.
-        dquadmon1 = 0.
+    max_ns_mass = max_ns_mass / lal.MSUN_SI
+    n = len(mass1)
+    radius1 = numpy.zeros(n, dtype=float)
+    radius2 = numpy.zeros(n, dtype=float)
+    k2_1 = numpy.zeros(n, dtype=float)
+    k2_2 = numpy.zeros(n, dtype=float)
+    lambda1 = numpy.zeros(n, dtype=float)
+    lambda2 = numpy.zeros(n, dtype=float)
+    dquadmon1 = numpy.zeros(n, dtype=float)
+    dquadmon2 = numpy.zeros(n, dtype=float)
 
-    if mass2 < max_ns_mass * 0.999:
-        radius = lalsimulation.SimNeutronStarRadius(float(mass2) * lal.MSUN_SI,
-                                                    eos_fam)
-        k2_lovenumber = lalsimulation.SimNeutronStarLoveNumberK2\
-            (float(mass2) * lal.MSUN_SI, eos_fam)
-        lambda2 = (2./3. * k2_lovenumber * radius**5) /\
-            (mass22*lal.MRSUN_SI)**5.
-        dquadmon2 = dquadmon_from_lambda(lambda2)
-    else:
-        lambda2 = 0.
-        dquadmon2 = 0.
+    for i in xrange(n):
+        if mass1[i] < max_ns_mass:
+            radius1[i] = lalsimulation.SimNeutronStarRadius\
+                (mass1[i]*lal.MSUN_SI, eos_fam)
+            k2_1[i] = lalsimulation.SimNeutronStarLoveNumberK2\
+                (mass1[i]*lal.MSUN_SI, eos_fam)
+        else:
+            # Set lambda to 0
+            radius1[i] = 0.
+            k2_1[i] = 0.
+        if mass2[i] < max_ns_mass:
+            radius2[i] = lalsimulation.SimNeutronStarRadius\
+                (mass2[i]*lal.MSUN_SI, eos_fam)
+            k2_2[i] = lalsimulation.SimNeutronStarLoveNumberK2\
+                (mass2[i]*lal.MSUN_SI, eos_fam)
+        else:
+            # Set lambda to 0
+            radius2[i] = 0
+            k2_2[i] = 0.
 
-    ffinal_isco = 1. / (6**(3./2.) * numpy.pi * (mass1+mass2)) 
-    if (lambda1 == 0) or (lambda2 == 0):
-        ffinal = ffinal_isco
-    else:
-        log_lmd1 = numpy.log(lamda1)
-        log_lmd2 = numpy.log(lamda2)
-        cness1 = 0.371 - 0.0391*log_lmd1 + 0.001056*log_lmd1*log_lmd1
-        cness2 = 0.371 - 0.0391*log_lmd2 + 0.001056*log_lmd2*log_lmd2
-        # Do we need to define the radius again? Tim's paper does use what is
-        # probably a slightly different convention, but could check this
-        radius1 = mass1 / cness1
-        radius2 = mass2 / cness2
-        ffinal_eos = 1. / numpy.pi * ((mass1 + mass2) /\
-            (radius1 + radius2)**3)**0.5 
-        ffinal = numpy.minimum(ffinal_isco, ffinal_eos)
+    lgc = radius1 == 0
+    nlgc = ~lgc
+    lambda1[nlgc] = (2./3. * k2_1[nlgc] * radius1[nlgc]**5) /\
+        (mass1[nlgc]*lal.MRSUN_SI)**5.
+    dquadmon1[nlgc] = dquadmon_from_lambda(lambda1[nlgc])
+    lgc = radius2 == 0
+    nlgc = ~lgc
+    lambda2[nlgc] = (2./3. * k2_2[nlgc] * radius2[nlgc]**5) /\
+        (mass2[nlgc]*lal.MRSUN_SI)**5.
+    dquadmon2[nlgc] = dquadmon_from_lambda(lambda2[nlgc])
 
-    return lambda1, lambda2, dquadmon1, dquadmon2, ffinal
+    m1T = mass1 * lal.MTSUN_SI
+    m2T = mass2 * lal.MTSUN_SI
+    ffinal_isco = 1. / (6**(3./2.) * numpy.pi * (m1T+m2T))
+    ffinal = numpy.zeros(len(mass1), dtype=float)
+    lgc = (lambda1 == 0) | (lambda2 == 0)
+    ffinal[lgc] = ffinal_isco[lgc]
+    not_lgc = ~lgc
+    log_lmd1 = numpy.log(lambda1[nlgc])
+    log_lmd2 = numpy.log(lambda2[nlgc])
+    cness1 = 0.371 - 0.0391*log_lmd1 + 0.001056*log_lmd1*log_lmd1
+    cness2 = 0.371 - 0.0391*log_lmd2 + 0.001056*log_lmd2*log_lmd2
+    # Do we need to define the radius again? Tim's paper does use what is
+    # probably a slightly different convention, but could check this
+    radius1 = m1T[nlgc] / cness1
+    radius2 = m2T[nlgc] / cness2
+    ffinal_eos = 1. / numpy.pi * ((m1T[nlgc]+m2T[nlgc]) /\
+        (radius1 + radius2)**3)**0.5
+    ffinal[nlgc] = numpy.minimum(ffinal_isco[nlgc], ffinal_eos)
+
+    return formatreturn(lambda1, input_is_array),\
+        formatreturn(lambda2, input_is_array),\
+        formatreturn(dquadmon1, input_is_array),\
+        formatreturn(dquadmon2, input_is_array),\
+        formatreturn(ffinal, input_is_array)
 
 
 #def lambdas_dquadmons_from_mass1_mass2_eos(mass1, mass2, eos):
@@ -784,4 +811,5 @@ __all__ = ['dquadmon_from_lambda', 'lambda_tilde', 'primary_mass', 'secondary_ma
            'spin2y_from_mass1_mass2_xi2_phi_a_phi_s',
            'chirp_distance', 'det_tc', 'snr_from_loglr',
            'freq_from_final_mass_spin', 'tau_from_final_mass_spin',
+           'lambdas_dquadmons_termfreq_from_mass1_mass2_eos'
           ]
