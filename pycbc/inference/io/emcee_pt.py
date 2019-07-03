@@ -41,6 +41,8 @@ class EmceePTFile(MultiTemperedMCMCIO, MultiTemperedMetadataIO,
         """
         super(EmceePTFile, self).write_sampler_metadata(sampler)
         self[self.sampler_group].attrs["betas"] = sampler.betas
+        self[self.sampler_group].attrs["tswap_acceptance_fraction"] = \
+            sampler.tswap_acceptance_fraction
 
     def read_acceptance_fraction(self, temps=None, walkers=None):
         """Reads the acceptance fraction.
