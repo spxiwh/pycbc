@@ -576,6 +576,121 @@ class FDomainDetFrameGenerator(object):
             h = strain.apply_gates_to_fd(h, self.gates)
         return h
 
+class FDomainDetFrameLensedGenerator(FDomainDetFrameGenerator):
+
+    def __init__(self, rFrameGeneratorClass, epoch1, epoch2, detectors=None,
+                 variable_args=(), recalib=None, gates=None, **frozen_params):
+        # initialize frozen & current parameters:
+        self.current_params = frozen_params.copy()
+        self._static_args = frozen_params.copy()
+        # we'll separate out frozen location parameters from the frozen
+        # parameters that are sent to the rframe generator
+        self.frozen_location_args = {}
+        loc_params = set(frozen_params.keys()) & self.location_args
+        for param in loc_params:
+            self.frozen_location_args[param] = frozen_params.pop(param)
+        # set the order of the variable parameters
+        self.variable_args = tuple(variable_args)
+        # variables that are sent to the rFrame generator
+        rframe_variables = list(set(self.variable_args) - self.location_args)
+        # initialize the radiation frame generator
+        self.rframe_generator = rFrameGeneratorClass(
+            variable_args=rframe_variables, **frozen_params)
+        self.set_epoch1(epoch1)
+        self.set_epoch2(epoch2)
+        # set calibration model
+        self.recalib = recalib
+        # if detectors are provided, convert to detector type; also ensure that
+        # location variables are specified
+        if detectors is not None:
+            self.detectors = {}
+            for det in detectors:
+                assert(len(det) == 2)
+                if det[1] == '1':
+                    self.detectors[det] = Detector(det)
+                elif det[1] == '2':
+                    self.detectors[det] = Detector(det[0] + '1')
+                else:
+                    raise ValueError()
+            missing_args = [arg for arg in self.location_args if not
+                (arg in self.current_params or arg in self.variable_args)]
+            if any(missing_args):
+                raise ValueError("detectors provided, but missing location "
+                    "parameters %s. " %(', '.join(missing_args)) +
+                    "These must be either in the frozen params or the "
+                    "variable args.")
+        else:
+            self.detectors = {'RF': None}
+        self.detector_names = sorted(self.detectors.keys())
+        self.gates = gates
+
+    def set_epoch1(self, epoch1):
+        """Sets the epoch; epoch should be a float or a LIGOTimeGPS."""
+        self._epoch1 = float(epoch1)
+
+    @property
+    def epoch1(self):
+        return _lal.LIGOTimeGPS(self._epoch1)
+
+    def set_epoch2(self, epoch2):
+        """Sets the epoch; epoch should be a float or a LIGOTimeGPS."""
+        self._epoch2 = float(epoch2)
+
+    @property
+    def epoch2(self):
+        return _lal.LIGOTimeGPS(self._epoch2)
+
+    def generate(self, **kwargs):
+        """Generates a waveform, applies a time shift and the detector response
+        function from the given kwargs.
+        """
+        self.current_params.update(kwargs)
+        rfparams = {param: self.current_params[param]
+            for param in kwargs if param not in self.location_args}
+        hp, hc = self.rframe_generator.generate(**rfparams)
+        if isinstance(hp, TimeSeries):
+            df = self.current_params['delta_f']
+            hp = hp.to_frequencyseries(delta_f=df)
+            hc = hc.to_frequencyseries(delta_f=df)
+            # time-domain waveforms will not be shifted so that the peak amp
+            # happens at the end of the time series (as they are for f-domain),
+            # so we add an additional shift to account for it
+            tshift = 1./df - abs(hp._epoch)
+        else:
+            tshift = 0.
+        h = {}
+        for detname, det in self.detectors.items():
+            # apply detector response function
+            if det[1] == '1':
+                curr_tc = self.current_params['tc']
+                hp._epoch = hc._epoch = self._epoch1
+            else:
+                curr_tc = (self.current_params['tc']
+                           + self.current_params['time_shift']
+                           + self.current_params['time_shift_uncertainty'])
+                hp._epoch = hc._epoch = self._epoch2
+            fp, fc = det.antenna_pattern(self.current_params['ra'],
+                        self.current_params['dec'],
+                        self.current_params['polarization'],
+                        curr_tc)
+            thish = fp*hp + fc*hc
+            # apply the time shift
+            tc = curr_tc + \
+                det.time_delay_from_earth_center(self.current_params['ra'],
+                     self.current_params['dec'], curr_tc)
+            h[detname] = apply_fd_time_shift(thish, tc+tshift, copy=False)
+            if self.recalib:
+                # recalibrate with given calibration model
+                h[detname] = \
+                    self.recalib[detname].map_to_adjust(h[detname],
+                        **self.current_params)
+        if self.gates is not None:
+            # resize all to nearest power of 2
+            for d in h.values():
+                d.resize(ceilpow2(len(d)-1) + 1)
+            h = strain.apply_gates_to_fd(h, self.gates)
+        return h
+
 
 def select_waveform_generator(approximant):
     """Returns the single-IFO generator for the approximant.
