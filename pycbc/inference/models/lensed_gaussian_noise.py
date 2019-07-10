@@ -26,7 +26,7 @@ from pycbc.types import Array, FrequencySeries
 from .base_data import BaseDataModel
 
 
-class GaussianNoise(BaseDataModel):
+class GaussianNoiseLensed(BaseDataModel):
     r"""Model that assumes data is stationary Gaussian noise.
 
     With Gaussian noise the log likelihood functions for signal
@@ -214,7 +214,7 @@ class GaussianNoise(BaseDataModel):
     logprior: 0.92
 
     """
-    name = 'gaussian_noise'
+    name = 'gaussian_noise_lensed'
 
     def __init__(self, variable_params, data, low_frequency_cutoff, psds=None,
                  high_frequency_cutoff=None, static_params=None,
@@ -678,7 +678,7 @@ def create_waveform_generator(variable_params, data,
                         d.start_time == start_time]):
                 raise ValueError("data must all have the same delta_t, "
                                  "delta_f, and start_time")
-    waveform_generator = generator.FDomainDetFrameGenerator(
+    waveform_generator = generator.FDomainDetFrameLensedGenerator(
         generator_function, epoch=start_time,
         variable_args=variable_params, detectors=list(data.keys()),
         delta_f=delta_f, delta_t=delta_t,
