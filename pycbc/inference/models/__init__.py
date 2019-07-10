@@ -23,6 +23,7 @@ assuming various noise models.
 from .analytic import (TestEggbox, TestNormal, TestRosenbrock, TestVolcano,
                        TestPrior)
 from .gaussian_noise import GaussianNoise
+from .lensed_gaussian_noise import GaussianNoiseLensed
 from .marginalized_gaussian_noise import (MarginalizedPhaseGaussianNoise,
                                           MarginalizedGaussianNoise)
 from .single_template import SingleTemplate
@@ -183,5 +184,6 @@ models = {_cls.name: _cls for _cls in (
     GaussianNoise,
     MarginalizedPhaseGaussianNoise,
     MarginalizedGaussianNoise,
-    SingleTemplate
+    SingleTemplate,
+    GaussianNoiseLensed
 )}
