@@ -220,7 +220,7 @@ class GaussianNoiseLensed(BaseDataModel):
                  high_frequency_cutoff=None, static_params=None,
                  **kwargs):
         # set up the boiler-plate attributes
-        super(GaussianNoise, self).__init__(variable_params, data,
+        super(BaseDataModel, self).__init__(variable_params, data,
                                             static_params=static_params,
                                             **kwargs)
         # check if low frequency cutoff has been provided for every IFO.
