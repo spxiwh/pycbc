@@ -119,6 +119,10 @@ class EmceePTSampler(MultiTemperedAutocorrSupport, MultiTemperedSupport,
     def betas(self):
         return self._sampler.betas
 
+    @property
+    def tswap_acceptance_fraction(self):
+        return self._sampler.tswap_acceptance_fraction
+
     @classmethod
     def from_config(cls, cp, model, output_file=None, nprocesses=1,
                     use_mpi=False):
