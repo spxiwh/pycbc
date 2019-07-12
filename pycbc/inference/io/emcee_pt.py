@@ -41,8 +41,6 @@ class EmceePTFile(MultiTemperedMCMCIO, MultiTemperedMetadataIO,
         """
         super(EmceePTFile, self).write_sampler_metadata(sampler)
         self[self.sampler_group].attrs["betas"] = sampler.betas
-        self[self.sampler_group].attrs["tswap_acceptance_fraction"] = \
-            sampler.tswap_acceptance_fraction
 
     def read_acceptance_fraction(self, temps=None, walkers=None):
         """Reads the acceptance fraction.
@@ -96,3 +94,11 @@ class EmceePTFile(MultiTemperedMCMCIO, MultiTemperedMetadataIO,
         except KeyError:
             # dataset doesn't exist yet, create it
             self[group] = acceptance_fraction
+
+        assert sampler.tswap_acceptance_fraction.shape == (self.ntemps,)
+        group = self.sampler_group + '/tswap_acceptance_fraction'
+        try:
+            self[group][:] = sampler.tswap_acceptance_fraction
+        except KeyError:
+            # dataset doesn't exist yet, create it
+            self[group] = sampler.tswap_acceptance_fraction
