@@ -73,7 +73,8 @@ class EmceePTFile(MultiTemperedMCMCIO, MultiTemperedMetadataIO,
             tmask[temps] = True
         return self[group][:][numpy.ix_(tmask, wmask)]
 
-    def write_acceptance_fraction(self, acceptance_fraction):
+    def write_acceptance_fraction(self, acceptance_fraction,
+                                  tswap_acceptance_fraction=None):
         """Write acceptance_fraction data to file.
 
         Results are written to ``[sampler_group]/acceptance_fraction``; the
@@ -95,10 +96,11 @@ class EmceePTFile(MultiTemperedMCMCIO, MultiTemperedMetadataIO,
             # dataset doesn't exist yet, create it
             self[group] = acceptance_fraction
 
-        assert sampler.tswap_acceptance_fraction.shape == (self.ntemps,)
-        group = self.sampler_group + '/tswap_acceptance_fraction'
-        try:
-            self[group][:] = sampler.tswap_acceptance_fraction
-        except KeyError:
-            # dataset doesn't exist yet, create it
-            self[group] = sampler.tswap_acceptance_fraction
+        if tswap_acceptance_fraction is not None:
+            assert tswap_acceptance_fraction.shape == (self.ntemps,)
+            group = self.sampler_group + '/tswap_acceptance_fraction'
+            try:
+                self[group][:] = tswap_acceptance_fraction
+            except KeyError:
+                # dataset doesn't exist yet, create it
+                self[group] = tswap_acceptance_fraction
