@@ -220,7 +220,8 @@ class GaussianNoiseLensed(BaseDataModel):
                  high_frequency_cutoff=None, static_params=None,
                  **kwargs):
         # set up the boiler-plate attributes
-        super(BaseDataModel, self).__init__(variable_params, data,
+        print "KW", kwargs
+        super(GaussianNoiseLensed, self).__init__(variable_params, data,
                                             static_params=static_params,
                                             **kwargs)
         # check if low frequency cutoff has been provided for every IFO.
@@ -621,6 +622,7 @@ class GaussianNoiseLensed(BaseDataModel):
         args.update(cls.extra_args_from_config(cp, "model",
                                                skip_args=ignore_args))
         args.update(kwargs)
+        print args
         return cls(**args)
 
 
@@ -678,8 +680,9 @@ def create_waveform_generator(variable_params, data,
                         d.start_time == start_time]):
                 raise ValueError("data must all have the same delta_t, "
                                  "delta_f, and start_time")
+    # FIXME: NEEDS TO BE TWO DIFFERENT TIMES LATER!!
     waveform_generator = generator.FDomainDetFrameLensedGenerator(
-        generator_function, epoch=start_time,
+        generator_function, start_time, start_time,
         variable_args=variable_params, detectors=list(data.keys()),
         delta_f=delta_f, delta_t=delta_t,
         recalib=recalibration, gates=gates,
