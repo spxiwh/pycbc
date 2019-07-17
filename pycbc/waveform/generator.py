@@ -170,7 +170,7 @@ class BaseCBCGenerator(BaseGenerator):
         all_args = all_args - calib_args
         unused_args = all_args.difference(params_used) \
                               .difference(self.possible_args)
-        if len(unused_args):
+        if len(unused_args) and 0:
             logging.warning("WARNING: The following args are not being used "
                             "for waveform generation: %s",
                             ', '.join(unused_args))
@@ -661,19 +661,22 @@ class FDomainDetFrameLensedGenerator(FDomainDetFrameGenerator):
         h = {}
         for detname, det in self.detectors.items():
             # apply detector response function
-            if det[1] == '1':
+            if detname[1] == '1':
                 curr_tc = self.current_params['tc']
                 hp._epoch = hc._epoch = self._epoch1
+                curr_pol = self.current_params['polarization']
+                mag_factor = 1
             else:
-                curr_tc = (self.current_params['tc']
-                           + self.current_params['time_shift']
-                           + self.current_params['time_shift_uncertainty'])
+                curr_tc = self.current_params['tc2']
                 hp._epoch = hc._epoch = self._epoch2
+                curr_pol = self.current_params['polarization2']
+                mag_factor = self.current_params['magnification']
             fp, fc = det.antenna_pattern(self.current_params['ra'],
                         self.current_params['dec'],
-                        self.current_params['polarization'],
+                        curr_pol,
                         curr_tc)
             thish = fp*hp + fc*hc
+            thish = thish * mag_factor
             # apply the time shift
             tc = curr_tc + \
                 det.time_delay_from_earth_center(self.current_params['ra'],
