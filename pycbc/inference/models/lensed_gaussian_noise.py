@@ -220,7 +220,6 @@ class GaussianNoiseLensed(BaseDataModel):
                  high_frequency_cutoff=None, static_params=None,
                  **kwargs):
         # set up the boiler-plate attributes
-        print "KW", kwargs
         super(GaussianNoiseLensed, self).__init__(variable_params, data,
                                             static_params=static_params,
                                             **kwargs)
@@ -576,7 +575,7 @@ class GaussianNoiseLensed(BaseDataModel):
         fp : pycbc.inference.io.BaseInferenceFile instance
             The inference file to write to.
         """
-        super(GaussianNoise, self).write_metadata(fp)
+        super(GaussianNoiseLensed, self).write_metadata(fp)
         if self._psds is not None:
             fp.write_psd(self._psds)
         try:
@@ -622,7 +621,6 @@ class GaussianNoiseLensed(BaseDataModel):
         args.update(cls.extra_args_from_config(cp, "model",
                                                skip_args=ignore_args))
         args.update(kwargs)
-        print args
         return cls(**args)
 
 
