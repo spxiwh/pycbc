@@ -280,7 +280,7 @@ class EmceePTSampler(MultiTemperedAutocorrSupport, MultiTemperedSupport,
             # write stats
             fp.write_samples(self.model_stats, last_iteration=self.niterations)
             # write accpetance
-            tswapfrac = self._sampler.tswap_acceptance_fraction
+            tswapfrac = self.tswap_acceptance_fraction
             fp.write_acceptance_fraction(self._sampler.acceptance_fraction,
                                          tswap_acceptance_fraction=tswapfrac)
             # write random state
