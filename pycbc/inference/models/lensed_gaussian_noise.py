@@ -668,19 +668,29 @@ def create_waveform_generator(variable_params, data,
     # get data parameters; we'll just use one of the data to get the
     # values, then check that all the others are the same
     delta_f = None
-    for d in data.values():
+    start_time = None
+    start_time2 = None
+    for ifo, d in data.items():
         if delta_f is None:
             delta_f = d.delta_f
             delta_t = d.delta_t
-            start_time = d.start_time
         else:
-            if not all([d.delta_f == delta_f, d.delta_t == delta_t,
-                        d.start_time == start_time]):
+            if not all([d.delta_f == delta_f, d.delta_t == delta_t]):
                 raise ValueError("data must all have the same delta_t, "
-                                 "delta_f, and start_time")
+                                 "and delta_f")
+        if ifo[1] == '1':
+            if start_time is None:
+                start_time = d.start_time
+            else:
+                assert(start_time == d.start_time)
+        elif ifo[1] == '2':
+            if start_time2 is None:
+                start_time2 = d.start_time
+            else:
+                assert(start_time2 == d.start_time)
     # FIXME: NEEDS TO BE TWO DIFFERENT TIMES LATER!!
     waveform_generator = generator.FDomainDetFrameLensedGenerator(
-        generator_function, start_time, start_time,
+        generator_function, start_time, start_time2,
         variable_args=variable_params, detectors=list(data.keys()),
         delta_f=delta_f, delta_t=delta_t,
         recalib=recalibration, gates=gates,
