@@ -36,6 +36,8 @@ from pycbc.inference import (models, burn_in, option_utils)
 from pycbc.strain.calibration import Recalibrate
 from pycbc.workflow import configuration
 from pycbc.inject import InjectionSet
+from pycbc.types import MultiDetOptionAppendAction, MultiDetOptionAction
+from pycbc.types import MultiDetOptionActionSpecial
 
 # command line usage
 parser = argparse.ArgumentParser(usage=__file__ + " [--options]",
@@ -71,12 +73,15 @@ parser.add_argument("--samples-file", default=None,
 parser.add_argument("--instruments", type=str, nargs="+",
                     help="IFOs, eg. H1 L1.")
 option_utils.add_low_frequency_cutoff_opt(parser)
-parser.add_argument("--psd-start-time", type=float, default=None,
+parser.add_argument("--psd-start-time", nargs='+', action=MultiDetOptionAction,
+                    type=float, default=None,
                     help="Start time to use for PSD estimation if different "
                          "from analysis.")
-parser.add_argument("--psd-end-time", type=float, default=None,
+parser.add_argument("--psd-end-time", nargs='+', action=MultiDetOptionAction,
+                    type=float, default=None,
                     help="End time to use for PSD estimation if different "
                          "from analysis.")
+
 parser.add_argument("--seed", type=int, default=0,
                     help="Seed to use for the random number generator that "
                          "initially distributes the walkers. Default is 0.")
