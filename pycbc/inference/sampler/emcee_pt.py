@@ -121,7 +121,23 @@ class EmceePTSampler(MultiTemperedAutocorrSupport, MultiTemperedSupport,
 
     @property
     def tswap_acceptance_fraction(self):
-        return self._sampler.tswap_acceptance_fraction
+        swaps = self._sampler.tswap_acceptance_fraction
+        # The sampler stores, for each temperature, the average swap rate for
+        # swaps to higher temperature, or to lower temperature. This is not so
+        # useful. As one bad link in the chain might not show up here if the
+        # two surrounding links have a good swap rate. Therefore we will
+        # make this length equal to the number of *links* in the temperature
+        # chain (ntemps - 1), and then store the swap acceptance fraction at
+        # each link. If one of these numbers is very low, it will mean that the
+        # sampler will probably take a very long time to converge
+        ret_vals = [swaps[0]]
+        for val in swaps[1:-1]:
+            lst_val = ret_vals[-1]
+            curr_val = 2 * (val - lst_val/2.)
+            ret_vals.append(curr_val)
+        # Sanity check as there is redundant information in the swaps list
+        assert((swaps[-1] - ret_vals[-1]) < 1E-4)
+        return numpy.array(ret_vals)
 
     @classmethod
     def from_config(cls, cp, model, output_file=None, nprocesses=1,

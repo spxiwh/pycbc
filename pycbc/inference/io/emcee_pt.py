@@ -97,7 +97,7 @@ class EmceePTFile(MultiTemperedMCMCIO, MultiTemperedMetadataIO,
             self[group] = acceptance_fraction
 
         if tswap_acceptance_fraction is not None:
-            assert tswap_acceptance_fraction.shape == (self.ntemps,)
+            assert tswap_acceptance_fraction.shape == (self.ntemps-1,)
             group = self.sampler_group + '/tswap_acceptance_fraction'
             try:
                 self[group][:] = tswap_acceptance_fraction
