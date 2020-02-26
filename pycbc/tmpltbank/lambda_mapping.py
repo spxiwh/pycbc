@@ -81,10 +81,10 @@ def generate_mapping(order):
         return mapping
     # For some as-of-yet unknown reason, the tidal terms are not giving correct
     # match estimates when enabled. So, for now, this order is commented out.
-    #if order == 'tidalTesting':
-    #    mapping['Lambda10'] = 8
-    #    mapping['Lambda12'] = 9
-    #    return mapping
+    if order == 'tidalTesting':
+        mapping['Lambda10'] = 8
+        mapping['Lambda12'] = 9
+        return mapping
     raise ValueError("Order %s is not understood." %(order))
 
 # Override doc so the PN orders are added automatically to online docs
