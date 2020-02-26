@@ -295,3 +295,72 @@ def get_chirp_params(mass1, mass2, spin1z, spin2z, f0, order,
 
 get_chirp_params.__doc__ = \
     get_chirp_params.__doc__.format(pycbcValidOrdersHelpDescriptions)
+
+def shift_lal_phasing_by_delta_lambda(lal_phasing, delta_lambda, metric_idx,
+                                      total_mass, metric_params,
+                                      edit_in_place=False):
+    """
+    Apply a shift of delta_lambda to a LAL TaylorF2 phasing array.
+    Return a copy of lal_phasing with the phase parameters shifted to
+    correspond to a shift of chirp_params[metric_idx] by delta_lambda.
+    Note that the lal_phasing structure carries terms of
+    pi * M * f that are not included in this module's definition (necesarily).
+    Note also that shifting a log term in the metric also requires a change
+    in the corresponding non-log term in the lal_phasing array. log**2 terms
+    are not yet supported but will add yet more complexity.
+    Parameters
+    -----------
+    lal_phasing : lal.PNPhasingSeries
+        Input phasing array. Will be copied and *not* changed in place.
+    delta_lambda : float
+        The amount to shift the phasing at metric_idx.
+    metric_idx : int
+        The component of the metric to shift by delta_lambda
+    total_mass : float
+        Total mass is needed to compute pi * M * f
+    metric_params : pycbc.tmpltbank.MetricParameters instance
+        The metric for which to apply the delta_lambda.
+    edit_in_place : boolean
+        If True we will just edit lal_phasing in place and return in.
+    """
+    pim = PI * (total_mass)*MTSUN_SI
+    pmf = pim * metric_params.f0
+    pmf13 = pmf**(1./3.)
+    logpim13 = numpy.log((pim)**(1./3.))
+
+    mapping = generate_inverse_mapping(metric_params.pnOrder)
+    lambda_str = '^Lambda([0-9]+)'
+    loglambda_str = '^LogLambda([0-9]+)'
+
+    if edit_in_place:
+        new_phasing = lal_phasing
+    else:
+        new_phasing = lalsimulation.PNPhasingSeries()
+        new_phasing.v[:] = lal_phasing.v[:]
+        new_phasing.vlogv[:] = lal_phasing.vlogv[:]
+        new_phasing.vlogvsq[:] = lal_phasing.vlogvsq[:]
+
+    # RE magic engage!
+    # Non-log terms
+    rematch = re.match(lambda_str, mapping[metric_idx])
+    if rematch:
+        pn_order = int(rematch.groups()[0])
+        lal_diff = delta_lambda / (pmf13**(-5+pn_order))
+        new_phasing.v[pn_order] = new_phasing.v[pn_order] + lal_diff
+        return new_phasing
+
+    # Log terms
+    rematch = re.match(loglambda_str, mapping[metric_idx])
+    if rematch:
+        pn_order = int(rematch.groups()[0])
+        lal_l_diff = delta_lambda / (pmf13**(-5+pn_order))
+        new_phasing.vlogv[pn_order] = new_phasing.vlogv[pn_order] + lal_l_diff
+        # Also need to change non log term
+        pycbc_nl_diff = lal_l_diff * logpim13
+        lal_nl_diff = - pycbc_nl_diff
+        new_phasing.v[pn_order] = new_phasing.v[pn_order] + lal_nl_diff
+        return new_phasing
+
+    err_msg = "Cannot match {} to a PN order".format(mapping[idx])
+    raise ValueError(err_msg)
+
