@@ -184,6 +184,6 @@ models = {_cls.name: _cls for _cls in (
     GaussianNoise,
     MarginalizedPhaseGaussianNoise,
     SingleTemplate,
-    RelativeSPA
+    RelativeSPA,
     GaussianNoiseLensed
 )}
