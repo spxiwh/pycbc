@@ -656,7 +656,7 @@ class GaussianNoiseLensed(BaseDataModel):
                                                         self._f_upper[det]
 
     @classmethod
-    def from_config(cls, cp, data_section='data', * **kwargs):
+    def from_config(cls, cp, data_section='data', **kwargs):
         r"""Initializes an instance of this class from the given config file.
 
         In addition to ``[model]``, a ``data_section`` (default ``[data]``)
