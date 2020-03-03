@@ -75,7 +75,7 @@ def create_data_parser():
     # add data options
     parser.add_argument("--instruments", type=str, nargs="+", required=True,
                         help="Instruments to analyze, eg. H1 L1.")
-    parser.add_argument("--trigger-time", type=float, default=0.,
+    parser.add_argument("--trigger-time", type=int, default=0.,
                         nargs='+', action=MultiDetOptionAction,
                         metavar='IFO:TIME',
                         help="Reference GPS time (at geocenter) from which "
@@ -329,7 +329,7 @@ def data_opts_from_config(cp, section, filter_flow):
     opts = parser.parse_args(optstr.split())
     # figure out the times to use
     logging.info("Determining analysis times to use")
-    opts.trigger_time = int(opts.trigger_time)
+    opts.trigger_time = opts.trigger_time
     gps_start = opts.analysis_start_time.copy()
     gps_end = opts.analysis_end_time.copy()
     for det in opts.instruments:
