@@ -76,6 +76,8 @@ def create_data_parser():
     parser.add_argument("--instruments", type=str, nargs="+", required=True,
                         help="Instruments to analyze, eg. H1 L1.")
     parser.add_argument("--trigger-time", type=float, default=0.,
+                        nargs='+', action=MultiDetOptionAction,
+                        metavar='IFO:TIME',
                         help="Reference GPS time (at geocenter) from which "
                              "the (anlaysis|psd)-(start|end)-time options are "
                              "measured. The integer seconds will be used. "
