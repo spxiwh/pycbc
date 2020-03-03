@@ -333,8 +333,8 @@ def data_opts_from_config(cp, section, filter_flow):
     gps_start = opts.analysis_start_time.copy()
     gps_end = opts.analysis_end_time.copy()
     for det in opts.instruments:
-        gps_start[det] += opts.trigger_time
-        gps_end[det] += opts.trigger_time
+        gps_start[det] += opts.trigger_time[det]
+        gps_end[det] += opts.trigger_time[det]
         if opts.psd_inverse_length is not None:
             pad = int(numpy.ceil(opts.psd_inverse_length[det] / 2))
             logging.info("Padding %s analysis start and end times by %d "
@@ -344,9 +344,9 @@ def data_opts_from_config(cp, section, filter_flow):
         gps_start[det] -= pad
         gps_end[det] += pad
         if opts.psd_start_time[det] is not None:
-            opts.psd_start_time[det] += opts.trigger_time
+            opts.psd_start_time[det] += opts.trigger_time[det]
         if opts.psd_end_time[det] is not None:
-            opts.psd_end_time[det] += opts.trigger_time
+            opts.psd_end_time[det] += opts.trigger_time[det]
     opts.gps_start_time = gps_start
     opts.gps_end_time = gps_end
     # check for the frequencies
