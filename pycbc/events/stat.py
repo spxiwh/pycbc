@@ -53,7 +53,7 @@ class Stat(object):
         self.files = {}
         files = files or []
         for filename in files:
-            f = h5py.File(filename, 'r')
+            f = h5py.File(filename, 'rw')
             stat = (f.attrs['stat']).decode()
             if stat in self.files:
                 raise RuntimeError("We already have one file with stat attr ="
@@ -326,7 +326,11 @@ class PhaseTDNewStatistic(NewSNRStatistic):
             for i in range(ncol):
                 self.param_bin[ifo]['c%s' % i] = param[:, i]
 
-            lsort = self.param_bin[ifo].argsort()
+            if 'param_bin_lsort' in histfile[ifo]:
+                lsort = histfile[ifo]['param_bin_lsort'][:]
+            else:
+                lsort = self.param_bin[ifo].argsort()
+                histfile[ifo]['param_bin_lsort'] = lsort
             self.param_bin[ifo] = self.param_bin[ifo][lsort]
             self.weights[ifo] = self.weights[ifo][lsort]
 
