@@ -109,6 +109,15 @@ class PyCBCFindMultiifoCoincExecutable(Executable):
 
     current_retention_level = Executable.ALL_TRIGGERS
     file_input_options = ['--statistic-files']
+
+    def __init__(self, cp, name, reuse_executable=True, **kwargs):
+        super(PyCBCFindMultiifoCoincExecutable, self).__init__(
+            cp,
+            name,
+            reuse_executable=reuse_executable,
+            **kwargs
+        )
+
     def create_node(self, trig_files, bank_file, stat_files, veto_file,
                     veto_name, template_str, pivot_ifo, fixed_ifo, tags=None):
         if tags is None:
