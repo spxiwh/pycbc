@@ -110,7 +110,7 @@ class PyCBCFindMultiifoCoincExecutable(Executable):
     current_retention_level = Executable.ALL_TRIGGERS
     file_input_options = ['--statistic-files']
 
-    def __init__(self, cp, name, reuse_executable=True, **kwargs):
+    def __init__(self, cp, name, reuse_executable=False, **kwargs):
         super(PyCBCFindMultiifoCoincExecutable, self).__init__(
             cp,
             name,
