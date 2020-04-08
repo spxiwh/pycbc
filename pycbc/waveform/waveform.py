@@ -598,7 +598,7 @@ def get_td_waveform_from_fd(rwrap=0.2, **params):
 
     while full_duration < duration * 1.5:
         full_duration = get_waveform_filter_length_in_time(**nparams)
-        nparams['f_lower'] -= 1
+        nparams['f_lower'] /= 10
 
     if 'f_ref' not in nparams:
         nparams['f_ref'] = params['f_lower']

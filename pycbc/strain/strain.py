@@ -352,7 +352,7 @@ def from_cli(opt, dyn_range_fac=1, precision='single',
             raise ValueError('Please provide low frequency cutoff to '
                              'generate a fake strain')
         duration = opt.gps_end_time - opt.gps_start_time
-        pdf = 1. / 128
+        pdf = 1. / (128 * 2048)
         plen = int(opt.sample_rate / pdf) // 2 + 1
 
         if opt.fake_strain_from_file:

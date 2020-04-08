@@ -28,7 +28,7 @@ from numpy.random import RandomState
 
 # These need to be constant to be able to recover identical results.
 # The hope is that nobody needs a higher resolution
-SAMPLE_RATE = 16384
+SAMPLE_RATE = 1
 BLOCK_SIZE = 100
 FILTER_LENGTH = 128
 
@@ -148,7 +148,8 @@ def colored_noise(psd, start_time, end_time, seed=0, low_frequency_cutoff=1.0):
                                 trunc_method='hann')
 
     kmin = int(low_frequency_cutoff / psd.delta_f)
-    psd[:kmin].clear()
+    if kmin > 0:
+        psd[:kmin].clear()
     asd = (psd.real())**0.5
     del psd
 
