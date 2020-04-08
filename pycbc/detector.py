@@ -83,7 +83,15 @@ class Detector(object):
 
         """
         self.name = str(detector_name)
-        self.frDetector = lalsimulation.DetectorPrefixToLALDetector(self.name)
+        if self.name in ['X1', 'X2', 'X3']:
+            if self.name == 'X1':
+                self.frDetector = example_lisa.frDetector
+            if self.name == 'X2':
+                self.frDetector = example_lisa2.frDetector
+            if self.name == 'X3':
+                self.frDetector = example_lisa3.frDetector
+        else:
+            self.frDetector = lalsimulation.DetectorPrefixToLALDetector(self.name)
         self.response = self.frDetector.response
         self.location = self.frDetector.location
         self.latitude = self.frDetector.frDetector.vertexLatitudeRadians
@@ -322,3 +330,32 @@ def overhead_antenna_pattern(right_ascension, declination, polarization):
 def effective_distance(distance, inclination, f_plus, f_cross):
     return distance / np.sqrt( ( 1 + np.cos( inclination )**2 )**2 / 4 * f_plus**2 + np.cos( inclination )**2 * f_cross**2 )
 
+
+# Define LISA detectors for use above:
+example_lisa = pycbc.detector.Detector('E1')
+example_lisa2 = pycbc.detector.Detector('E2')
+example_lisa3 = pycbc.detector.Detector('E3')
+
+import lal
+def edit_detector(example_lisa):
+    example = lal.FrDetector()
+    example.name = 'Z1'
+    example.prefix = example_lisa.frDetector.frDetector.prefix
+    example.vertexLongitudeRadians = example_lisa.frDetector.frDetector.vertexLongitudeRadians
+    example.vertexLatitudeRadians = example_lisa.frDetector.frDetector.vertexLatitudeRadians
+    example.vertexElevation = (example_lisa.frDetector.frDetector.vertexElevation + 6371000) * 5000000 / 10
+    example.xArmAltitudeRadians = example_lisa.frDetector.frDetector.xArmAltitudeRadians
+    example.xArmAzimuthRadians = example_lisa.frDetector.frDetector.xArmAzimuthRadians
+    example.xArmMidpoint = example_lisa.frDetector.frDetector.xArmMidpoint
+    example.yArmAltitudeRadians = example_lisa.frDetector.frDetector.yArmAltitudeRadians
+    example.yArmAzimuthRadians = example_lisa.frDetector.frDetector.yArmAzimuthRadians
+    example.yArmMidpoint = example_lisa.frDetector.frDetector.yArmMidpoint
+    new_det = lal.Detector()
+    new_det = lal.CreateDetector(new_det, example, lal.LALDETECTORTYPE_IFODIFF)
+    example_lisa.frDetector = new_det
+    example_lisa.location = example_lisa.frDetector.location
+    return example_lisa
+
+example_lisa = edit_detector(example_lisa)
+example_lisa2 = edit_detector(example_lisa2)
+example_lisa3 = edit_detector(example_lisa3)
