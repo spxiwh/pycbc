@@ -84,12 +84,12 @@ class Detector(object):
 
         """
         self.name = str(detector_name)
-        if self.name in ['X1', 'X2', 'X3']:
-            if self.name == 'X1':
+        if self.name in ['Z1', 'Z2', 'Z3']:
+            if self.name == 'Z1':
                 self.frDetector = example_lisa.frDetector
-            if self.name == 'X2':
+            if self.name == 'Z2':
                 self.frDetector = example_lisa2.frDetector
-            if self.name == 'X3':
+            if self.name == 'Z3':
                 self.frDetector = example_lisa3.frDetector
         else:
             self.frDetector = lalsimulation.DetectorPrefixToLALDetector(self.name)
