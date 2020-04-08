@@ -62,7 +62,8 @@ def get_available_detectors():
     known_lal_names = [j for j in ld.keys() if "DETECTOR_PREFIX" in j]
     known_prefixes = [ld[k] for k in known_lal_names]
     known_names = [ld[k.replace('PREFIX', 'NAME')] for k in known_lal_names]
-    return list(zip(known_prefixes, known_names))
+    adds = [('Z1', 'MOCK_LISA1'), ('Z2', 'MOCK_LISA2'), ('Z3', 'MOCK_LISA3')]
+    return list(zip(known_prefixes, known_names)) + adds
 
 
 class Detector(object):
@@ -332,9 +333,9 @@ def effective_distance(distance, inclination, f_plus, f_cross):
 
 
 # Define LISA detectors for use above:
-example_lisa = pycbc.detector.Detector('E1')
-example_lisa2 = pycbc.detector.Detector('E2')
-example_lisa3 = pycbc.detector.Detector('E3')
+example_lisa = Detector('E1')
+example_lisa2 = Detector('E2')
+example_lisa3 = Detector('E3')
 
 import lal
 def edit_detector(example_lisa):
