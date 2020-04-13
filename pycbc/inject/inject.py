@@ -503,7 +503,8 @@ class CBCHDFInjectionSet(_HDFInjectionSet):
                 continue
             signal = self.make_strain_from_inj_object(inj, strain.delta_t,
                      detector_name, f_lower=f_l, distance_scale=distance_scale)
-            signal = signal * 1E16
+            signal = signal * 1E26
+            print ("REAL LOUD INJECTION ADDED!!")
             if float(signal.start_time) > t1:
                 continue
 
