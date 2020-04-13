@@ -331,6 +331,7 @@ def data_opts_from_config(cp, section, filter_flow):
     gps_start = opts.analysis_start_time.copy()
     gps_end = opts.analysis_end_time.copy()
     for det in opts.instruments:
+        pad = 0
         gps_start[det] += opts.trigger_time
         gps_end[det] += opts.trigger_time
         if opts.psd_inverse_length[det] is not None:
