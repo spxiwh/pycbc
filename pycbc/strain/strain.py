@@ -366,8 +366,8 @@ def from_cli(opt, dyn_range_fac=1, precision='single',
 
         if opt.fake_strain == 'zeroNoise':
             logging.info("Making zero-noise time series")
-            strain = TimeSeries(pycbc.types.zeros(duration * 16384),
-                                delta_t=1. / 16384,
+            strain = TimeSeries(pycbc.types.zeros(duration * 1.),
+                                delta_t=1.,
                                 epoch=opt.gps_start_time)
         else:
             logging.info("Making colored noise")
