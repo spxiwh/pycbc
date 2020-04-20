@@ -20,7 +20,7 @@ import numpy
 import scipy.special
 
 from pycbc import filter as pyfilter
-from pycbc.waveform import get_fd_waveform
+from pycbc.waveform import get_fd_waveform, get_fd_waveform_from_td
 from pycbc.detector import Detector
 
 from .gaussian_noise import BaseGaussianNoise
