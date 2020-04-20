@@ -523,13 +523,8 @@ def get_fd_waveform_from_td(**params):
     """
 
     # determine the duration to use
-    full_duration = duration = get_waveform_filter_length_in_time(**params)
     nparams = params.copy()
-
-    while full_duration < duration * 1.5:
-        full_duration = get_waveform_filter_length_in_time(**nparams)
-        nparams['f_lower'] -= 1
-
+    
     if 'f_fref' not in nparams:
         nparams['f_ref'] = params['f_lower']
 
@@ -541,7 +536,7 @@ def get_fd_waveform_from_td(**params):
         f_end = get_waveform_end_frequency(**params)
         delta_t = (0.5 / pnutils.nearest_larger_binary_number(f_end))
     except:
-        delta_t = 1.0 / 2048
+        delta_t = 1.0
 
     nparams['delta_t'] = delta_t
     hp, hc = get_td_waveform(**nparams)
@@ -559,7 +554,7 @@ def get_fd_waveform_from_td(**params):
 
     # apply the tapering, we will use a safety factor here to allow for
     # somewhat innacurate duration difference estimation.
-    window = (full_duration - duration) * 0.8
+    window = len(hp) * 0.1
     hp = wfutils.td_taper(hp, hp.start_time, hp.start_time + window)
     hc = wfutils.td_taper(hc, hc.start_time, hc.start_time + window)
 
