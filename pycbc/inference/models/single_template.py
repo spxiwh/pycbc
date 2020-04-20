@@ -59,6 +59,7 @@ class SingleTemplate(BaseGaussianNoise):
 
     def __init__(self, variable_params, data, low_frequency_cutoff,
                  sample_rate=32768, **kwargs):
+        print("HELLO", sample_rate)
         super(SingleTemplate, self).__init__(
             variable_params, data, low_frequency_cutoff, **kwargs)
 
