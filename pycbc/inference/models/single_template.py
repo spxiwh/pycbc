@@ -69,7 +69,10 @@ class SingleTemplate(BaseGaussianNoise):
             _ = p.pop('distance')
         if 'inclination' in p:
             _ = p.pop('inclination')
-        hp, _ = get_fd_waveform(delta_f=df, distance=1, inclination=0, **p)
+        try:
+            hp, _ = get_fd_waveform(delta_f=df, distance=1, inclination=0, **p)
+        except:
+            hp, _ = get_fd_waveform_from_td(delta_f=df, distance=1, inclination=0, **p)
 
         # Extend template to high sample rate
         flen = int(int(sample_rate) / df) / 2 + 1
