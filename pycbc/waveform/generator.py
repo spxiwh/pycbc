@@ -511,6 +511,8 @@ class FDomainDetFrameGenerator(object):
             self.detectors = {'RF': None}
         self.detector_names = sorted(self.detectors.keys())
         self.gates = gates
+        self.global_hp = None
+        self.global_hc = None
 
     def set_epoch(self, epoch):
         """Sets the epoch; epoch should be a float or a LIGOTimeGPS."""
@@ -532,7 +534,13 @@ class FDomainDetFrameGenerator(object):
         self.current_params.update(kwargs)
         rfparams = {param: self.current_params[param]
             for param in kwargs if param not in self.location_args}
-        hp, hc = self.rframe_generator.generate(**rfparams)
+        if self.global_hp is not None:
+            hp = self.global_hp
+            hc = self.global_hc
+        else:
+            hp, hc = self.rframe_generator.generate(**rfparams)
+            self.global_hp = hp
+            self.global_hc = hc
         if isinstance(hp, TimeSeries):
             df = self.current_params['delta_f']
             hp = hp.to_frequencyseries(delta_f=df)
