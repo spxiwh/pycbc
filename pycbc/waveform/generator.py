@@ -541,17 +541,17 @@ class FDomainDetFrameGenerator(object):
             hp, hc = self.rframe_generator.generate(**rfparams)
             self.global_hp = hp
             self.global_hc = hc
-        if isinstance(hp, TimeSeries):
-            df = self.current_params['delta_f']
-            hp = hp.to_frequencyseries(delta_f=df)
-            hc = hc.to_frequencyseries(delta_f=df)
-            # time-domain waveforms will not be shifted so that the peak amp
-            # happens at the end of the time series (as they are for f-domain),
-            # so we add an additional shift to account for it
-            tshift = 1./df - abs(hp._epoch)
-        else:
-            tshift = 0.
-        hp._epoch = hc._epoch = self._epoch
+            if isinstance(hp, TimeSeries):
+                df = self.current_params['delta_f']
+                hp = hp.to_frequencyseries(delta_f=df)
+                hc = hc.to_frequencyseries(delta_f=df)
+                # time-domain waveforms will not be shifted so that the peak amp
+                # happens at the end of the time series (as they are for f-domain),
+                # so we add an additional shift to account for it
+                tshift = 1./df - abs(hp._epoch)
+            else:
+                tshift = 0.
+            hp._epoch = hc._epoch = self._epoch
         h = {}
         if self.detector_names != ['RF']:
             for detname, det in self.detectors.items():
