@@ -96,13 +96,14 @@ class SingleTemplate(BaseGaussianNoise):
                 psd=self.psds[ifo],
                 low_frequency_cutoff=flow,
                 high_frequency_cutoff=fhigh)
-            self.snr[ifo].save('snr_{}.hdf'.format(ifo))
 
             self.sh[ifo] = 4 * df * snr
             self.hh[ifo] = -0.5 * pyfilter.sigmasq(
                 hp, psd=self.psds[ifo],
                 low_frequency_cutoff=flow,
                 high_frequency_cutoff=fhigh)
+                        
+            snr.save('snr_{}.hdf'.format(ifo))
             print (ifo, self.hh[ifo])
         self.time = None
 
