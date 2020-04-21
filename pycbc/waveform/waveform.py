@@ -551,16 +551,15 @@ def get_fd_waveform_from_td(**params):
         raise ValueError("The frequency spacing (df = {}) is too low to "
                          "generate the {} approximant from the time "
                          "domain".format(params['delta_f'], params['approximant']))
+    window = len(hp) * 0.1
+    hp = wfutils.td_taper(hp, hp.start_time, hp.start_time + window)
+    hc = wfutils.td_taper(hc, hc.start_time, hc.start_time + window)
 
     hp.resize(tsamples)
     hc.resize(tsamples)
 
     # apply the tapering, we will use a safety factor here to allow for
     # somewhat innacurate duration difference estimation.
-    window = len(hp) * 0.1
-    hp = wfutils.td_taper(hp, hp.start_time, hp.start_time + window)
-    hc = wfutils.td_taper(hc, hc.start_time, hc.start_time + window)
-
     # avoid wraparound
     hp = hp.to_frequencyseries().cyclic_time_shift(hp.start_time)
     hc = hc.to_frequencyseries().cyclic_time_shift(hc.start_time)
