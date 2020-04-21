@@ -137,7 +137,7 @@ class SingleTemplate(BaseGaussianNoise):
 
             sh = self.sh[ifo].at_time(p['tc'] + dt) * htf
             print("DEBUGGING SNRs", ifo, int((p['tc'] + dt-self.sh[ifo].start_time)*self.sh[ifo].sample_rate), self.sh[ifo].at_time(p['tc'] + dt), htf, file=self.logging)
-            print("DEBUGGING SNRs", p['tc'] + dt, abs(self.sh[ifo].data).argmax(), self.sh[ifo].data[abs(self.sh[ifo].data).argmax()], file=self.logging)
+            print("DEBUGGING SNRs", p['tc'] + dt, abs(self.sh[ifo].data).argmax(), self.sh[ifo].data[abs(self.sh[ifo].data).argmax()], self.time, dt, file=self.logging)
             shloglr += sh.real
             hhloglr += self.hh[ifo] * abs(htf)**2
 
