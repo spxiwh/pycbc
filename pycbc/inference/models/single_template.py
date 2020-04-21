@@ -106,6 +106,7 @@ class SingleTemplate(BaseGaussianNoise):
             snr.save('snr_{}.hdf'.format(ifo))
             print (ifo, self.hh[ifo])
         self.time = None
+        self.logging = open('logging.txt', 'w')
 
     def _loglr(self):
         r"""Computes the log likelihood ratio
@@ -140,7 +141,6 @@ class SingleTemplate(BaseGaussianNoise):
 
         vloglr = numpy.log(scipy.special.i0e(abs(shloglr)))
         vloglr += abs(shloglr) + hhloglr
-        print ("LL EVAL", p['ra'], p['dec'], p['polarization'], p['tc'], p['inclination'], p['distance'])
-        print (numpy.log(scipy.special.i0e(abs(shloglr))), abs(shloglr), hhloglr)
+        print ("LL EVAL", p['ra'], p['dec'], p['polarization'], p['tc'], p['inclination'], p['distance'], float(vloglr), file=self.logging)
 
         return float(vloglr)
