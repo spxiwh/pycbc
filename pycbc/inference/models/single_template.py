@@ -91,7 +91,7 @@ class SingleTemplate(BaseGaussianNoise):
             self.data[ifo].resize(flen)
             self.det[ifo] = Detector(ifo)
             self.data[ifo].save('data_{}.hdf'.format(ifo))
-            snr, _, _ = pyfilter.matched_filter_core(
+            snr, _, norm = pyfilter.matched_filter_core(
                 hp, self.data[ifo],
                 psd=self.psds[ifo],
                 low_frequency_cutoff=flow,
@@ -104,7 +104,7 @@ class SingleTemplate(BaseGaussianNoise):
                 high_frequency_cutoff=fhigh)
                         
             self.sh[ifo].save('snr_{}.hdf'.format(ifo))
-            print (ifo, self.hh[ifo])
+            print (ifo, self.hh[ifo], norm)
         self.time = None
         self.logging = open('logging.txt', 'w')
 
