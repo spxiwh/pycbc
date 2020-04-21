@@ -136,6 +136,7 @@ class SingleTemplate(BaseGaussianNoise):
             htf = (fp * ip + 1.0j * fc * ic) / p['distance']
 
             sh = self.sh[ifo].at_time(p['tc'] + dt) * htf
+            print("DEBUGGING SNRs", ifo, self.sh[ifo].at_time(p['tc'] + dt), htf, file=self.logging)
             shloglr += sh.real
             hhloglr += self.hh[ifo] * abs(htf)**2
 
