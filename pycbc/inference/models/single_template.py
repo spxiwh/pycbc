@@ -140,5 +140,7 @@ class SingleTemplate(BaseGaussianNoise):
 
         vloglr = numpy.log(scipy.special.i0e(abs(shloglr)))
         vloglr += abs(shloglr) + hhloglr
+        print ("LL EVAL", p['ra'], p['dec'], p['polarization'], p['tc'], p['inclination'], p['distance'])
+        print (numpy.log(scipy.special.i0e(abs(shloglr))), abs(shloglr), hhloglr)
 
         return float(vloglr)
