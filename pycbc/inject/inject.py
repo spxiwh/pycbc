@@ -561,18 +561,22 @@ class CBCHDFInjectionSet(_HDFInjectionSet):
 
         hp._epoch += inj.tc
         hc._epoch += inj.tc
-
-        # taper the polarizations
-        try:
-            hp_tapered = wfutils.taper_timeseries(hp, inj.taper)
-            hc_tapered = wfutils.taper_timeseries(hc, inj.taper)
-        except AttributeError:
-            hp_tapered = hp
-            hc_tapered = hc
+            
+        # apply the tapering, we will use a safety factor here to allow for
+        # somewhat innacurate duration difference estimation.
+        window = len(hp) * 0.1
+        hp = wfutils.td_taper(hp, hp.start_time, hp.start_time + window)
+        hc = wfutils.td_taper(hc, hc.start_time, hc.start_time + window)
 
         # compute the detector response and add it to the strain
-        signal = detector.project_wave(hp_tapered, hc_tapered,
-                             inj.ra, inj.dec, inj.polarization)
+        fp, fc = self.det[ifo].antenna_pattern(p['ra'], p['dec'],
+                                               p['polarization'],
+                                               self.time)
+        dt = self.det[ifo].time_delay_from_earth_center(p['ra'],
+                                                        p['dec'],
+                                                        self.time)
+        signal = fp * hp + hc * fc
+        signal._epoch += dt
 
         return signal
 
