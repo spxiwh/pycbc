@@ -571,9 +571,9 @@ class CBCHDFInjectionSet(_HDFInjectionSet):
         # compute the detector response and add it to the strain
         fp, fc = detector.antenna_pattern(inj.ra, inj.dec,
                                           inj.polarization,
-                                          self.time)
+                                          inj.tc)
         dt = detector.time_delay_from_earth_center(inj.ra, inj.dec,
-                                                   self.time)
+                                                   inj.tc)
         signal = fp * hp + hc * fc
         signal._epoch += dt
 
