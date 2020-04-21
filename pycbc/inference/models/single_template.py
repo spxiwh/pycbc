@@ -78,6 +78,7 @@ class SingleTemplate(BaseGaussianNoise):
         # Extend template to high sample rate
         flen = int(int(sample_rate) / df) / 2 + 1
         hp.resize(flen)
+        hp.save('hp_waveform.hdf')
 
         # Calculate high sample rate SNR time series
         self.sh = {}
@@ -89,17 +90,20 @@ class SingleTemplate(BaseGaussianNoise):
             # Extend data to high sample rate
             self.data[ifo].resize(flen)
             self.det[ifo] = Detector(ifo)
+            self.data[ifo].save('data_{}.hdf'.format(ifo))
             snr, _, _ = pyfilter.matched_filter_core(
                 hp, self.data[ifo],
                 psd=self.psds[ifo],
                 low_frequency_cutoff=flow,
                 high_frequency_cutoff=fhigh)
+            self.snr[ifo].save('snr_{}.hdf'.format(ifo))
 
             self.sh[ifo] = 4 * df * snr
             self.hh[ifo] = -0.5 * pyfilter.sigmasq(
                 hp, psd=self.psds[ifo],
                 low_frequency_cutoff=flow,
                 high_frequency_cutoff=fhigh)
+            print (ifo, self.hh[ifo])
         self.time = None
 
     def _loglr(self):
