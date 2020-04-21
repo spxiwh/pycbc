@@ -865,6 +865,7 @@ class GaussianNoise(BaseGaussianNoise):
         # also store the loglikelihood, to ensure it is populated in the
         # current stats even if loglikelihood is never called
         self._current_stats.loglikelihood = lr + self.lognl
+        print ("LOGLR EVALUATION", float(lr), self._current_stats)
         return float(lr)
 
     def det_cplx_loglr(self, det):
