@@ -103,7 +103,7 @@ class SingleTemplate(BaseGaussianNoise):
                 low_frequency_cutoff=flow,
                 high_frequency_cutoff=fhigh)
                         
-            snr.save('snr_{}.hdf'.format(ifo))
+            self.sh[ifo].save('snr_{}.hdf'.format(ifo))
             print (ifo, self.hh[ifo])
         self.time = None
         self.logging = open('logging.txt', 'w')
