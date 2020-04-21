@@ -136,11 +136,10 @@ class SingleTemplate(BaseGaussianNoise):
             htf = (fp * ip + 1.0j * fc * ic) / p['distance']
 
             sh = self.sh[ifo].at_time(p['tc'] + dt) * htf
-            shloglr += sh
-            hhloglr += self.hh[ifo] * abs(htf) ** 2.0
+            shloglr += sh.real
+            hhloglr += self.hh[ifo] * abs(htf)
 
-        vloglr = numpy.log(scipy.special.i0e(abs(shloglr)))
-        vloglr += abs(shloglr) + hhloglr
+        vloglr = shloglr) + hhloglr
         print ("LL EVAL", p['ra'], p['dec'], p['polarization'], p['tc'], p['inclination'], p['distance'], float(vloglr), file=self.logging)
 
         return float(vloglr)
