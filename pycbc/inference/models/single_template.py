@@ -140,6 +140,6 @@ class SingleTemplate(BaseGaussianNoise):
             hhloglr += self.hh[ifo] * abs(htf)
 
         vloglr = shloglr + hhloglr
-        print ("LL EVAL", p['ra'], p['dec'], p['polarization'], p['tc'], p['inclination'], p['distance'], float(vloglr), file=self.logging)
+        print ("LL EVAL", p['ra'], p['dec'], p['polarization'], p['tc'], p['inclination'], p['distance'], shloglr, hhloglr, file=self.logging)
 
         return float(vloglr)
