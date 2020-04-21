@@ -569,12 +569,11 @@ class CBCHDFInjectionSet(_HDFInjectionSet):
         hc = wfutils.td_taper(hc, hc.start_time, hc.start_time + window)
 
         # compute the detector response and add it to the strain
-        fp, fc = self.det[ifo].antenna_pattern(p['ra'], p['dec'],
-                                               p['polarization'],
-                                               self.time)
-        dt = self.det[ifo].time_delay_from_earth_center(p['ra'],
-                                                        p['dec'],
-                                                        self.time)
+        fp, fc = detector.antenna_pattern(inj.ra, inj.dec,
+                                          inj.polarization,
+                                          self.time)
+        dt = detector.time_delay_from_earth_center(inj.ra, inj.dec,
+                                                   self.time)
         signal = fp * hp + hc * fc
         signal._epoch += dt
 
