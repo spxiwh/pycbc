@@ -539,8 +539,6 @@ class FDomainDetFrameGenerator(object):
             hc = self.global_hc
         else:
             hp, hc = self.rframe_generator.generate(**rfparams)
-            self.global_hp = hp
-            self.global_hc = hc
             if isinstance(hp, TimeSeries):
                 df = self.current_params['delta_f']
                 hp = hp.to_frequencyseries(delta_f=df)
@@ -552,6 +550,8 @@ class FDomainDetFrameGenerator(object):
             else:
                 tshift = 0.
             hp._epoch = hc._epoch = self._epoch
+            self.global_hp = hp
+            self.global_hc = hc
         h = {}
         if self.detector_names != ['RF']:
             for detname, det in self.detectors.items():
