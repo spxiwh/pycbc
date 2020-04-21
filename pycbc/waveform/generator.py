@@ -546,9 +546,9 @@ class FDomainDetFrameGenerator(object):
                 # time-domain waveforms will not be shifted so that the peak amp
                 # happens at the end of the time series (as they are for f-domain),
                 # so we add an additional shift to account for it
-                tshift = 1./df - abs(hp._epoch)
+                self.tshift = 1./df - abs(hp._epoch)
             else:
-                tshift = 0.
+                self.tshift = 0.
             hp._epoch = hc._epoch = self._epoch
             self.global_hp = hp
             self.global_hc = hc
@@ -565,7 +565,7 @@ class FDomainDetFrameGenerator(object):
                 tc = self.current_params['tc'] + \
                     det.time_delay_from_earth_center(self.current_params['ra'],
                          self.current_params['dec'], self.current_params['tc'])
-                h[detname] = apply_fd_time_shift(thish, tc+tshift, copy=False)
+                h[detname] = apply_fd_time_shift(self.thish, tc+self.tshift, copy=False)
                 if self.recalib:
                     # recalibrate with given calibration model
                     h[detname] = \
@@ -574,7 +574,7 @@ class FDomainDetFrameGenerator(object):
         else:
             # no detector response, just use the + polarization
             if 'tc' in self.current_params:
-                hp = apply_fd_time_shift(hp, self.current_params['tc']+tshift,
+                hp = apply_fd_time_shift(hp, self.current_params['tc']+self.tshift,
                                          copy=False)
             h['RF'] = hp
         if self.gates is not None:
