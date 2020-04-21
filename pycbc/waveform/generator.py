@@ -565,7 +565,7 @@ class FDomainDetFrameGenerator(object):
                 tc = self.current_params['tc'] + \
                     det.time_delay_from_earth_center(self.current_params['ra'],
                          self.current_params['dec'], self.current_params['tc'])
-                h[detname] = apply_fd_time_shift(self.thish, tc+self.tshift, copy=False)
+                h[detname] = apply_fd_time_shift(thish, tc+self.tshift, copy=False)
                 if self.recalib:
                     # recalibrate with given calibration model
                     h[detname] = \
