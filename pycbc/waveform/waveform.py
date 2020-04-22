@@ -134,7 +134,6 @@ def _check_lal_pars(p):
     return lal_pars
 
 def _lalsim_td_waveform(**p):
-    print ("STARTING TD WAVEFORM GENERATION WITH LALSUITE")
     fail_tolerant_waveform_generation
     lal_pars = _check_lal_pars(p)
     #nonGRparams can be straightforwardly added if needed, however they have to
@@ -176,8 +175,6 @@ def _lalsim_td_waveform(**p):
     hp = TimeSeries(hp1.data.data[:], delta_t=hp1.deltaT, epoch=hp1.epoch)
     hc = TimeSeries(hc1.data.data[:], delta_t=hc1.deltaT, epoch=hc1.epoch)
     
-    print ("WAVEFORM GENERATED. LENGTH", len(hp), "AT", hp.delta_t)
-
     return hp, hc
 
 def _spintaylor_aligned_prec_swapper(**p):
