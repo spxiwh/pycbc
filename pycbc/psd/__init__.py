@@ -104,8 +104,6 @@ def from_cli(opt, length, delta_f, low_frequency_cutoff,
         psd[0:kmin] = psd[kmin]
 
         psd *= dyn_range_factor ** 2
-        print("HEELOOO!!!")
-        print(psd)
 
     elif psd_estimation:
         # estimate PSD from data
