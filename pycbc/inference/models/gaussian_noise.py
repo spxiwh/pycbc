@@ -858,7 +858,6 @@ class GaussianNoise(BaseGaussianNoise):
                 hh = h[slc].inner(h[slc]).real  # < h, h>
             cplx_loglr = cplx_hd - 0.5*hh
             # store
-            print ("VALS", cplx_hd, hh)
             setattr(self._current_stats, '{}_optimal_snrsq'.format(det), hh)
             setattr(self._current_stats, '{}_cplx_loglr'.format(det),
                     cplx_loglr)
@@ -866,7 +865,6 @@ class GaussianNoise(BaseGaussianNoise):
         # also store the loglikelihood, to ensure it is populated in the
         # current stats even if loglikelihood is never called
         self._current_stats.loglikelihood = lr + self.lognl
-        print ("LOGLR EVALUATION", float(lr))
         return float(lr)
 
     def det_cplx_loglr(self, det):
