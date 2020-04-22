@@ -572,7 +572,7 @@ class CBCHDFInjectionSet(_HDFInjectionSet):
         fp, fc = detector.antenna_pattern(inj.ra, inj.dec,
                                           inj.polarization,
                                           inj.tc)
-        dref = detector.Detector('Z1')
+        dref = Detector('Z1')
         dt = detector.time_delay_from_detector(dref, inj.ra, inj.dec,
                                                inj.tc)
         signal = fp * hp + hc * fc
