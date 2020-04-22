@@ -104,6 +104,8 @@ class SingleTemplate(BaseGaussianNoise):
                         
             self.sh[ifo].save('snr_{}.hdf'.format(ifo))
         self.time = None
+        self.dref = pycbc.detector.Detector('Z1')
+
         #self.logging = open('logging.txt', 'w')
 
     def _loglr(self):
@@ -126,9 +128,9 @@ class SingleTemplate(BaseGaussianNoise):
             fp, fc = self.det[ifo].antenna_pattern(p['ra'], p['dec'],
                                                    p['polarization'],
                                                    self.time)
-            dt = self.det[ifo].time_delay_from_earth_center(p['ra'],
-                                                            p['dec'],
-                                                            self.time)
+            dt = self.det[ifo].time_delay_from_detector(self.dref, p['ra'],
+                                                        p['dec'],
+                                                        self.time)
             ip = numpy.cos(p['inclination'])
             ic = 0.5 * (1.0 + ip * ip)
             htf = (fp * ip + 1.0j * fc * ic) / p['distance']
