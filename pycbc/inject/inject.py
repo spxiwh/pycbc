@@ -576,7 +576,6 @@ class CBCHDFInjectionSet(_HDFInjectionSet):
                                                    inj.tc)
         signal = fp * hp + hc * fc
         signal._epoch += dt
-        print("INJECTING SIGNAL AT", detector_name, inj.tc, dt, signal._epoch)
 
         return signal
 
