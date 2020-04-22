@@ -104,7 +104,7 @@ class SingleTemplate(BaseGaussianNoise):
                         
             self.sh[ifo].save('snr_{}.hdf'.format(ifo))
         self.time = None
-        self.dref = pycbc.detector.Detector('Z1')
+        self.dref = Detector('Z1')
 
         #self.logging = open('logging.txt', 'w')
 
