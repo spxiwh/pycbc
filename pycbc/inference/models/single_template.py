@@ -104,7 +104,7 @@ class SingleTemplate(BaseGaussianNoise):
                         
             self.sh[ifo].save('snr_{}.hdf'.format(ifo))
         self.time = None
-        self.logging = open('logging.txt', 'w')
+        #self.logging = open('logging.txt', 'w')
 
     def _loglr(self):
         r"""Computes the log likelihood ratio
@@ -134,12 +134,12 @@ class SingleTemplate(BaseGaussianNoise):
             htf = (fp * ip + 1.0j * fc * ic) / p['distance']
 
             sh = self.sh[ifo].at_time(p['tc'] + dt) * htf
-            print("DEBUGGING SNRs", ifo, int((p['tc'] + dt-self.sh[ifo].start_time)*self.sh[ifo].sample_rate), self.sh[ifo].at_time(p['tc'] + dt), htf, file=self.logging)
-            print("DEBUGGING SNRs", p['tc'] + dt, abs(self.sh[ifo].data).argmax(), self.sh[ifo].data[abs(self.sh[ifo].data).argmax()], self.time, dt, file=self.logging)
+            #print("DEBUGGING SNRs", ifo, int((p['tc'] + dt-self.sh[ifo].start_time)*self.sh[ifo].sample_rate), self.sh[ifo].at_time(p['tc'] + dt), htf, file=self.logging)
+            #print("DEBUGGING SNRs", p['tc'] + dt, abs(self.sh[ifo].data).argmax(), self.sh[ifo].data[abs(self.sh[ifo].data).argmax()], self.time, dt, file=self.logging)
             shloglr += sh.real
             hhloglr += self.hh[ifo] * abs(htf)**2
 
         vloglr = shloglr + hhloglr
-        print ("LL EVAL", p['ra'], p['dec'], p['polarization'], p['tc'], p['inclination'], p['distance'], shloglr, hhloglr, file=self.logging)
+        #print ("LL EVAL", p['ra'], p['dec'], p['polarization'], p['tc'], p['inclination'], p['distance'], shloglr, hhloglr, file=self.logging)
 
         return float(vloglr)
