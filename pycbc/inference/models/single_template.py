@@ -59,7 +59,6 @@ class SingleTemplate(BaseGaussianNoise):
 
     def __init__(self, variable_params, data, low_frequency_cutoff,
                  sample_rate=1, **kwargs):
-        print("HELLO", sample_rate)
         super(SingleTemplate, self).__init__(
             variable_params, data, low_frequency_cutoff, **kwargs)
 
@@ -104,7 +103,6 @@ class SingleTemplate(BaseGaussianNoise):
                 high_frequency_cutoff=fhigh)
                         
             self.sh[ifo].save('snr_{}.hdf'.format(ifo))
-            print (ifo, self.hh[ifo], norm)
         self.time = None
         self.logging = open('logging.txt', 'w')
 
