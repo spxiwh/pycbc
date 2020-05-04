@@ -94,7 +94,7 @@ class DynestySampler(BaseSampler):
                                               pool=pool, **kwargs)
 
     def run(self):
-        self._sampler.run_nested(add_live=False, dlogz=dlogz)
+        self._sampler.run_nested(add_live=False, dlogz=self.dlogz)
 
     @property
     def io(self):

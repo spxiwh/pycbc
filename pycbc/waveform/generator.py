@@ -37,6 +37,7 @@ from pycbc.detector import Detector
 import lal as _lal
 from pycbc import strain
 import logging
+import numpy as np
 
 #
 #   Generator for CBC waveforms
@@ -669,7 +670,14 @@ class FDomainDetFrameLensedGenerator(FDomainDetFrameGenerator):
             else:
                 curr_tc = self.current_params['tc2']
                 hp._epoch = hc._epoch = self._epoch2
-                curr_pol = self.current_params['polarization2']
+                if self.current_params['polarization2'] <= np.pi/2.:
+                    curr_pol = self.current_params['polarization2']
+                elif self.current_params['polarization2'] <= np.pi:
+                    curr_pol = self.current_params['polarization2'] + np.pi/2.
+                if self.current_params['polarization2'] <= 3.*np.pi/2.:
+                    curr_pol = self.current_params['polarization2'] + np.pi
+                else:
+                    curr_pol = self.current_params['polarization2'] + 3.*np.pi/2.
                 mag_factor = self.current_params['magnification']
             fp, fc = det.antenna_pattern(self.current_params['ra'],
                         self.current_params['dec'],
