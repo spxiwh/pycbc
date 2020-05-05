@@ -673,11 +673,11 @@ class FDomainDetFrameLensedGenerator(FDomainDetFrameGenerator):
                 if self.current_params['polarization2'] <= np.pi/2.:
                     curr_pol = self.current_params['polarization']
                 elif self.current_params['polarization2'] <= np.pi:
-                    curr_pol = self.current_params['polarization'] + np.pi/2.
+                    curr_pol = (self.current_params['polarization'] + np.pi/4.) % (2. * np.pi)
                 elif self.current_params['polarization2'] <= 3.*np.pi/2.:
-                    curr_pol = self.current_params['polarization'] + np.pi
+                    curr_pol = (self.current_params['polarization'] + np.pi/2.) % (2. * np.pi)
                 else:
-                    curr_pol = self.current_params['polarization'] + 3.*np.pi/2.
+                    curr_pol = (self.current_params['polarization'] + 3.*np.pi/4.) % (2. * np.pi)
                 mag_factor = self.current_params['magnification']
             fp, fc = det.antenna_pattern(self.current_params['ra'],
                         self.current_params['dec'],
