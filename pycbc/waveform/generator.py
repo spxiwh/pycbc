@@ -37,6 +37,7 @@ from pycbc.detector import Detector
 import lal as _lal
 from pycbc import strain
 import logging
+import numpy as np
 
 #
 #   Generator for CBC waveforms
@@ -664,18 +665,30 @@ class FDomainDetFrameLensedGenerator(FDomainDetFrameGenerator):
             if detname[1] == '1':
                 curr_tc = self.current_params['tc']
                 hp._epoch = hc._epoch = self._epoch1
-                curr_pol = self.current_params['polarization']
                 mag_factor = 1
+                curr_hp = hp
+                curr_hc = hc
             else:
                 curr_tc = self.current_params['tc2']
                 hp._epoch = hc._epoch = self._epoch2
-                curr_pol = self.current_params['polarization2']
+                if self.current_params['coa_phase2'] <= np.pi/2.:
+                    curr_hp = hp
+                    curr_hc = hc
+                elif self.current_params['coa_phase2'] <= np.pi:
+                    curr_hp = 1.j*hp
+                    curr_hc = 1.j*hc
+                elif self.current_params['coa_phase2'] <= 3.*np.pi/2.:
+                    curr_hp = -1.*hp
+                    curr_hc = -1.*hc
+                else:
+                    curr_hp = -1.j*hp
+                    curr_hc = -1.j*hc
                 mag_factor = self.current_params['magnification']
             fp, fc = det.antenna_pattern(self.current_params['ra'],
                         self.current_params['dec'],
-                        curr_pol,
+                        self.current_params['polarization'],
                         curr_tc)
-            thish = fp*hp + fc*hc
+            thish = fp*curr_hp + fc*curr_hc
             thish = thish * mag_factor
             # apply the time shift
             tc = curr_tc + \
