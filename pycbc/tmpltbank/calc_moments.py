@@ -27,9 +27,9 @@ class MomentsDict(UserDict):
     This class provides a dictionary of noise moments. Moments are only
     computed if needed (and cached for future calls).
     """
-    def __init__(*args, metric_params=None, vary_fmax=False, vary_density=None,
-                 **kwargs):
-        super(MomentsDict, self).__init__(*args, **kwargs)
+    def __init__(self, inp_dict, metric_params=None, vary_fmax=False,
+                 vary_density=None, **kwargs):
+        super(MomentsDict, self).__init__(inp_dict, **kwargs)
         if metric_params is None:
             err_msg = "metric_params keyword argument must be provided."
             raise ValueError(err_msg)
