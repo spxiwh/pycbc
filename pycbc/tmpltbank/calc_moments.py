@@ -16,7 +16,11 @@
 
 from __future__ import division
 import numpy
-from collections import UserDict
+try:
+    from collections import UserDict
+except ImportError:
+    # python2
+    from UserDict import UserDict
 from six.moves import range
 from pycbc.tmpltbank.lambda_mapping import generate_mapping
 
