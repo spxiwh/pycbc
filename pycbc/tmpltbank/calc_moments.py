@@ -33,7 +33,10 @@ class MomentsDict(UserDict):
     """
     def __init__(self, inp_dict, metric_params=None, vary_fmax=False,
                  vary_density=None, **kwargs):
-        super(MomentsDict, self).__init__(inp_dict, **kwargs)
+        # The python2 UserDict is a bit rubbish! It's not a new-style class
+        # so no super can be done. Move to super when python2 is deprecated.
+        #super(MomentsDict, self).__init__(inp_dict, **kwargs)
+        UserDict.__init__(self, inp_dict, **kwargs)
         if metric_params is None:
             err_msg = "metric_params keyword argument must be provided."
             raise ValueError(err_msg)
