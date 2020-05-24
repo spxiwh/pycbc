@@ -368,9 +368,6 @@ def calculate_metric_comp(gs, unmax_metric, term_1, term_2,
     Used to compute part of the metric. Only call this from within
     calculate_metric(). Please see the documentation for that function.
     """
-    # Time term in unmax_metric. Note that these terms are recomputed a bunch
-    # of time, but this cost is insignificant compared to computing the moments
-    unmax_metric[-1,-1] = (Js[1] - Js[4]*Js[4])
 
     # Identify input details
     term1_orders = identify_orders_from_string(term_1)
@@ -389,6 +386,10 @@ def calculate_metric_comp(gs, unmax_metric, term_1, term_2,
                                term2_orders[1])][term_freq]
     moment_6 = metric_moments[(4,0)][term_freq]
     moment_7 = metric_moments[(1,0)][term_freq]
+
+    # Time term in unmax_metric. Note that these terms are recomputed a bunch
+    # of time, but this cost is insignificant compared to computing the moments
+    unmax_metric[-1,-1] = (moment_7 - moment_6*moment_6)
 
     # And gamma terms
     gammaij = moment_1 - moment_2*moment_3
