@@ -58,8 +58,10 @@ class MomentsDict(UserDict):
                                 funct, vary_fmax=vary_fmax,
                                 vary_density=vary_density)
         self.norm = norm
-        self.data[(7,0)] = 1
-
+        # The (7,0) moment is 1 everywhere by definition.
+        self.data[(7,0)] = {}
+        for key in self.norm:
+            self.data[(7,0)][key] = 1.
 
 
     def __setitem__(self, key, value):
@@ -83,7 +85,7 @@ class MomentsDict(UserDict):
             value = calculate_moment(new_f, new_amp, self.metric_params.fLow,
                                 self.metric_params.fUpper,
                                 self.metric_params.f0,
-                                funct, vary_fmax=vary_fmax,
+                                funct, norm=self.norm, vary_fmax=vary_fmax,
                                 vary_density=vary_density)
             self.data[key] = value
             return value
