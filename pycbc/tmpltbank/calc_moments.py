@@ -43,9 +43,9 @@ class MomentsDict(UserDict):
 
         self.metric_params = metric_params
         
-        psd_amp = metricParams.psd.data
-        psd_f = numpy.arange(len(psd_amp), dtype=float) * metricParams.deltaF
-        new_f, new_amp = interpolate_psd(psd_f, psd_amp, metricParams.deltaF)
+        psd_amp = metric_params.psd.data
+        psd_f = numpy.arange(len(psd_amp), dtype=float) * metric_params.deltaF
+        new_f, new_amp = interpolate_psd(psd_f, psd_amp, metric_params.deltaF)
         self.new_f = new_f
         self.new_amp = new_amp
 
