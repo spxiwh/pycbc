@@ -153,10 +153,12 @@ def determine_eigen_directions(metricParams, preserveMoments=False,
         similar calculations.
     """
 
-    evals = {}
-    evecs = {}
-    metric = {}
-    unmax_metric = {}
+    metricParams.evals = {}
+    metricParams.evecs = {}
+    metricParams.metric = {}
+    metricParams.time_unprojected_metric = {}
+    metricParams.timephase_unprojected_metric = {}
+
 
     # First step is to get the moments needed to calculate the metric
     if not (metricParams.moments and preserveMoments):
@@ -171,31 +173,27 @@ def determine_eigen_directions(metricParams, preserveMoments=False,
         mapping = generate_mapping(metricParams.pnOrder)
 
         # Calculate the metric
-        gs, unmax_metric_curr = calculate_metric(metricParams.moments, mapping,
-                                                 term_freq)
-        metric[term_freq] = numpy.matrix(gs)
-        unmax_metric[term_freq] = unmax_metric_curr
+        calculate_metric(metricParams, mapping, term_freq)
 
         # And the eigenvalues
-        evals[term_freq],evecs[term_freq] = numpy.linalg.eig(gs)
+        curr_evals, curr_evecs = \
+            numpy.linalg.eig(metricParams.metric[term_freq])
 
         # Numerical error can lead to small negative eigenvalues.
-        for i in range(len(evals[term_freq])):
-            if evals[term_freq][i] < 0:
+        for i in range(len(curr_evals)):
+            if curr_evals[i] < 0:
                 # Due to numerical imprecision the very small eigenvalues can
                 # be negative. Make these positive.
-                evals[term_freq][i] = -evals[term_freq][i]
-            if evecs[term_freq][i,i] < 0:
+                curr_evals[i] = -curr_evals[i]
+            if curr_evecs[i,i] < 0:
                 # We demand a convention that all diagonal terms in the matrix
                 # of eigenvalues are positive.
                 # This is done to help visualization of the spaces (increasing
                 # mchirp always goes the same way)
-                evecs[term_freq][:,i] = - evecs[term_freq][:,i]
+                curr_evecs[:,i] = - curr_evecs[:,i]
 
-    metricParams.evals = evals
-    metricParams.evecs = evecs
-    metricParams.metric = metric
-    metricParams.time_unprojected_metric = unmax_metric
+        metricParams.evals[term_freq] = curr_evals
+        metricParams.evecs[term_freq] = curr_evecs
 
     return metricParams
 
@@ -318,7 +316,7 @@ def calculate_moment(psd_f, psd_amp, fmin, fmax, f0, funct,
                 moment[t_fmax] = moment[t_fmax] / norm[t_fmax]
     return moment
 
-def calculate_metric(metric_moments, mapping, term_freq):
+def calculate_metric(metric_params, mapping, term_freq):
     """
     This function will take the various integrals calculated by get_moments and
     convert this into a metric for the appropriate parameter space.
@@ -330,17 +328,24 @@ def calculate_metric(metric_moments, mapping, term_freq):
     """
 
     # How many dimensions in the parameter space?
-    maxLen = len(mapping.keys())
+    max_len = len(mapping.keys())
 
-    metric = numpy.matrix(numpy.zeros(shape=(maxLen,maxLen),dtype=float))
-    unmax_metric = numpy.matrix(numpy.zeros(shape=(maxLen+1,maxLen+1),
-                                                                  dtype=float))
+    metric = numpy.matrix(numpy.zeros(shape=(max_len, max_len),dtype=float))
+    t_unmax_metric = numpy.matrix(numpy.zeros(shape=(max_len+1, max_len+1),
+                                              dtype=float))
+    pt_unmax_metric = numpy.matrix(numpy.zeros(shape=(max_len+2, max_len+2),
+                                               dtype=float))
+    
 
     for term_1 in mapping:
         for term_2 in mapping:
-            calculate_metric_comp(metric, unmax_metric, term_1, term_2,
-                                  metric_moments, term_freq)
-    return metric, unmax_metric
+            calculate_metric_comp(metric, t_unmax_metric, pt_unmax_metric,
+                                  term_1, term_2,
+                                  metric_params.moments, term_freq)
+
+    metric_params.metric[term_freq] = metric
+    metric_params.time_unprojected_metric[term_freq] = t_unmax_metric
+    metric_params.timephase_unprojected_metric[term_freq] = pt_unmax_metric 
 
 def identify_orders_from_string(term_str):
     """
@@ -362,7 +367,7 @@ def identify_orders_from_string(term_str):
     return (pn_order, log_order)
 
 
-def calculate_metric_comp(gs, unmax_metric, term_1, term_2,
+def calculate_metric_comp(gs, t_unmax_metric, pt_unmax_metric, term_1, term_2,
                           metric_moments, term_freq):
     """
     Used to compute part of the metric. Only call this from within
@@ -389,7 +394,14 @@ def calculate_metric_comp(gs, unmax_metric, term_1, term_2,
 
     # Time term in unmax_metric. Note that these terms are recomputed a bunch
     # of time, but this cost is insignificant compared to computing the moments
-    unmax_metric[-1,-1] = (moment_7 - moment_6*moment_6)
+    t_unmax_metric[-1,-1] = (moment_7 - moment_6*moment_6)
+
+    # Time, phase, and time-phase terms in pt_unmax_metric
+    # Also set numerous times (-1 = time; -2 = phase)
+    pt_unmax_metric[-1,-1] = moment_7
+    pt_unmax_metric[-2,-2] = 1.
+    pt_unmax_metric[-1,-2] = moment_6
+    pt_unmax_metric[-2,-1] = moment_6
 
     # And gamma terms
     gammaij = moment_1 - moment_2*moment_3
@@ -399,8 +411,19 @@ def calculate_metric_comp(gs, unmax_metric, term_1, term_2,
     # And then metric terms
     gs[mapping[term1], mapping[term2]] = \
         0.5 * (gammaij - gamma0i*gamma0j/(moment_7 - moment_6*moment_6))
-    unmax_metric[mapping[term1], -1] = gamma0i
-    unmax_metric[-1, mapping[term1]] = gamma0i
-    unmax_metric[mapping[term2], -1] = gamma0j
-    unmax_metric[-1, mapping[term2]] = gamma0j 
-    unmax_metric[mapping[term1], mapping[term2]] = gammaij
+    t_unmax_metric[mapping[term1], -1] = gamma0i
+    t_unmax_metric[-1, mapping[term1]] = gamma0i
+    t_unmax_metric[mapping[term2], -1] = gamma0j
+    t_unmax_metric[-1, mapping[term2]] = gamma0j 
+    t_unmax_metric[mapping[term1], mapping[term2]] = gammaij
+
+    pt_unmax_metric[mapping[term1], -1] = moment_4
+    pt_unmax_metric[-1, mapping[term1]] = moment_4
+    pt_unmax_metric[mapping[term2], -1] = moment_5
+    pt_unmax_metric[-1, mapping[term2]] = moment_5
+    pt_unmax_metric[mapping[term1], -2] = moment_2
+    pt_unmax_metric[-2, mapping[term1]] = moment_2
+    pt_unmax_metric[mapping[term2], -2] = moment_3
+    pt_unmax_metric[-2, mapping[term2]] = moment_3
+    pt_unmax_metric[mapping[term1], mapping[term2]] = moment_1
+
