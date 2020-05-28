@@ -413,21 +413,22 @@ def calculate_metric_comp(gs, t_unmax_metric, pt_unmax_metric, term_1, term_2,
     gamma0j = moment_5 - moment_6*moment_3
 
     # And then metric terms
-    gs[mapping[term1], mapping[term2]] = \
+    gs[mapping[term_1], mapping[term_2]] = \
         0.5 * (gammaij - gamma0i*gamma0j/(moment_7 - moment_6*moment_6))
-    t_unmax_metric[mapping[term1], -1] = gamma0i
-    t_unmax_metric[-1, mapping[term1]] = gamma0i
-    t_unmax_metric[mapping[term2], -1] = gamma0j
-    t_unmax_metric[-1, mapping[term2]] = gamma0j 
-    t_unmax_metric[mapping[term1], mapping[term2]] = gammaij
 
-    pt_unmax_metric[mapping[term1], -1] = moment_4
-    pt_unmax_metric[-1, mapping[term1]] = moment_4
-    pt_unmax_metric[mapping[term2], -1] = moment_5
-    pt_unmax_metric[-1, mapping[term2]] = moment_5
-    pt_unmax_metric[mapping[term1], -2] = moment_2
-    pt_unmax_metric[-2, mapping[term1]] = moment_2
-    pt_unmax_metric[mapping[term2], -2] = moment_3
-    pt_unmax_metric[-2, mapping[term2]] = moment_3
-    pt_unmax_metric[mapping[term1], mapping[term2]] = moment_1
+    t_unmax_metric[mapping[term_1], -1] = gamma0i
+    t_unmax_metric[-1, mapping[term_1]] = gamma0i
+    t_unmax_metric[mapping[term_2], -1] = gamma0j
+    t_unmax_metric[-1, mapping[term_2]] = gamma0j 
+    t_unmax_metric[mapping[term_1], mapping[term_2]] = gammaij
+
+    pt_unmax_metric[mapping[term_1], -1] = moment_4
+    pt_unmax_metric[-1, mapping[term_1]] = moment_4
+    pt_unmax_metric[mapping[term_2], -1] = moment_5
+    pt_unmax_metric[-1, mapping[term_2]] = moment_5
+    pt_unmax_metric[mapping[term_1], -2] = moment_2
+    pt_unmax_metric[-2, mapping[term_1]] = moment_2
+    pt_unmax_metric[mapping[term_2], -2] = moment_3
+    pt_unmax_metric[-2, mapping[term_2]] = moment_3
+    pt_unmax_metric[mapping[term_1], mapping[term_2]] = moment_1
 
