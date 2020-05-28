@@ -344,7 +344,7 @@ def calculate_metric(metric_params, mapping, term_freq):
     for term_1 in mapping:
         for term_2 in mapping:
             calculate_metric_comp(metric, t_unmax_metric, pt_unmax_metric,
-                                  term_1, term_2,
+                                  term_1, term_2, mapping,
                                   metric_params.moments, term_freq)
 
     metric_params.metric[term_freq] = metric
@@ -372,7 +372,7 @@ def identify_orders_from_string(term_str):
 
 
 def calculate_metric_comp(gs, t_unmax_metric, pt_unmax_metric, term_1, term_2,
-                          metric_moments, term_freq):
+                          mapping, metric_moments, term_freq):
     """
     Used to compute part of the metric. Only call this from within
     calculate_metric(). Please see the documentation for that function.
