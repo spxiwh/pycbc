@@ -82,11 +82,13 @@ class MomentsDict(UserDict):
             logorder = key[1]
             funct = lambda x,f0: (numpy.log((x*f0)**(1./3.)))**logorder \
                 * x**((-order+7)/3.)
-            value = calculate_moment(new_f, new_amp, self.metric_params.fLow,
-                                self.metric_params.fUpper,
-                                self.metric_params.f0,
-                                funct, norm=self.norm, vary_fmax=vary_fmax,
-                                vary_density=vary_density)
+            value = calculate_moment(self.new_f, self.new_amp,
+                                     self.metric_params.fLow,
+                                     self.metric_params.fUpper,
+                                     self.metric_params.f0,
+                                     funct, norm=self.norm,
+                                     vary_fmax=vary_fmax,
+                                     vary_density=vary_density)
             self.data[key] = value
             return value
 
