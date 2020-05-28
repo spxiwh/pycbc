@@ -48,6 +48,8 @@ class MomentsDict(UserDict):
         new_f, new_amp = interpolate_psd(psd_f, psd_amp, metric_params.deltaF)
         self.new_f = new_f
         self.new_amp = new_amp
+        self.vary_fmax = vary_fmax
+        self.vary_density = vary_density
 
         # We need to compute the (7,0) moment as that is a normalization
         # factor
@@ -87,8 +89,8 @@ class MomentsDict(UserDict):
                                      self.metric_params.fUpper,
                                      self.metric_params.f0,
                                      funct, norm=self.norm,
-                                     vary_fmax=vary_fmax,
-                                     vary_density=vary_density)
+                                     vary_fmax=self.vary_fmax,
+                                     vary_density=self.vary_density)
             self.data[key] = value
             return value
 
