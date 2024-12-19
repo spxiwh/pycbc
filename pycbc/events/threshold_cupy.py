@@ -30,6 +30,7 @@ import pycbc.scheme
 
 val = None
 loc = None
+loc2 = None
 
 # https://stackoverflow.com/questions/77798014/cupy-rawkernel-cuda-error-not-found-named-symbol-not-found-cupy
 
@@ -136,7 +137,7 @@ extern "C" __global__ void threshold_and_cluster(float2* in, float2* outv, int* 
 """)
 
 tkernel2 = mako.template.Template("""
-extern "C" __global__ void threshold_and_cluster2(float2* outv, int* outl, float* thresholds, int window){
+extern "C" __global__ void threshold_and_cluster2(float2* outv, int* outl, int* outl2, float* thresholds, int window){
     __shared__ int loc[${blocks}];
     __shared__ float val[${blocks}];
                                   
@@ -145,6 +146,7 @@ extern "C" __global__ void threshold_and_cluster2(float2* outv, int* outl, float
     float threshold = thresholds[i / ${blockmemsize}];
                                   
     int l = outl[i];
+    outl2[i] = l;
     loc[i] = l;
 
     if (l == -1)
@@ -152,6 +154,7 @@ extern "C" __global__ void threshold_and_cluster2(float2* outv, int* outl, float
 
     val[i] = outv[i].x * outv[i].x + outv[i].y * outv[i].y;
 
+    // Why would a syncthreads not be needed here???
 
     // Check right
     if ( (posi < (${blocksize} - 1)) && (val[i + 1] > val[i]) ){
@@ -163,6 +166,9 @@ extern "C" __global__ void threshold_and_cluster2(float2* outv, int* outl, float
     if ( (posi > 0) && (val[i - 1] > val[i]) ){
         outl[i] = -1;
         return;
+    }
+    if (val[i] < threshold){
+        outl2[i] = -2;
     }
 }
 """)
@@ -249,7 +255,7 @@ class FastFilter:
         int count = 0;
         int row_offset = row * nb;
         for (int col = 0; col < nb; col++) {
-            if (cl[row_offset + col] != -1) {
+            if (cl[row_offset + col] != -1 && cl[row_offset + col] != -2) {
                 count++;
             }
         }
@@ -269,7 +275,7 @@ class FastFilter:
         int out_idx = offsets[row];
         int row_offset = row * nb;
         for (int col = 0; col < nb; col++) {
-            if (cl[row_offset + col] != -1) {
+            if (cl[row_offset + col] != -1 && cl[row_offset + col] != -2) {
                 cv_out[out_idx].x = cv[row_offset + col].x;
                 cv_out[out_idx].y = cv[row_offset + col].y;
                 cl_out[out_idx] = cl[row_offset + col];
@@ -283,9 +289,11 @@ class FastFilter:
         self.snum = snum
         self.nb = nb
         self.sizes = cp.empty(snum, dtype=cp.int32)
+        self.sizes2 = cp.empty(snum, dtype=cp.int32)
         self.offsets = cp.empty(snum, dtype=cp.int32)
+        self.offsets2 = cp.empty(snum, dtype=cp.int32)
         
-    def filter_arrays(self, cv, cl):
+    def filter_arrays(self, cv, cl, cl2):
         # Input handling
         cv = cp.asarray(cv, dtype=cp.complex64)
         cl = cp.asarray(cl, dtype=cp.int32)
@@ -299,6 +307,7 @@ class FastFilter:
             if cl.shape != (self.snum, self.nb):
                 raise ValueError(f"Expected shape ({self.snum}, {self.nb}), got {cl.shape}")
             cl = cl.reshape(-1)
+            cl2 = cl2.reshape(-1)
             
         # Compute sizes
         n_threads = (self.snum + 1023) // 1024
@@ -306,10 +315,14 @@ class FastFilter:
         
         self.size_kernel((blocks,), (n_threads,),
                         (cv, cl, self.sizes, self.nb, self.snum))
+        self.size_kernel((blocks,), (n_threads,),
+                        (cv, cl2, self.sizes2, self.nb, self.snum))
 
         # Compute offsets
         cp.cumsum(self.sizes[:-1], out=self.offsets[1:])
         self.offsets[0] = 0
+        cp.cumsum(self.sizes2[:-1], out=self.offsets2[1:])
+        self.offsets2[0] = 0
         
         # Allocate output arrays
         total_size = int(self.sizes.sum())
@@ -336,7 +349,12 @@ class FastFilter:
                 cv_filtered.append(cp.empty(0, dtype=cp.complex64))
                 cl_filtered.append(cp.empty(0, dtype=cp.int32))
             start += size
-        return cv_filtered, cl_filtered
+        # Second pass gets triggers that will need chisq later
+        self.filter_kernel((blocks,), (n_threads,),
+                          (cv, cl2, cv_out, cl_out,
+                           self.sizes2, self.offsets2,
+                           self.nb, self.snum))
+        return cv_filtered, cl_filtered, cv_out, cl_out, self.sizes
 
 class CUDAThresholdCluster(_BaseThresholdCluster):
     def __init__(self, series_batch, analyse_slice):
@@ -352,12 +370,15 @@ class CUDAThresholdCluster(_BaseThresholdCluster):
 
         global val
         global loc
+        global loc2
         if val is None or val.size < self.batch_size * self.batch_mem_size:
             val = cp.zeros((self.batch_size, self.batch_mem_size), dtype=cp.complex64)
         if loc is None or loc.size < self.batch_size * self.batch_mem_size:
             loc = cp.zeros((self.batch_size, self.batch_mem_size), cp.int32)
+            loc2 = cp.zeros((self.batch_size, self.batch_mem_size), cp.int32)
 
         self.outl = loc
+        self.outl2 = loc2
         self.outv = val
         # This is kind of hardcoded here, sorry. We maybe should pass window in here.
         nb = int(cp.ceil(self.analyse_len / float(2048)))
@@ -379,7 +400,8 @@ class CUDAThresholdCluster(_BaseThresholdCluster):
         block = (nt, 1, 1)
 
         fn(grid, block, (self.series_batch.data, self.outv, self.outl, window, threshold, self.series_length, self.analyse_start))
-        fn2(grid, block, (self.outv, self.outl, threshold, window))
+        # FIXME: UNHARDCODE THRESHOLD NUMBER. WOULD BE THE CHI-SQUARED THRESHOLD!
+        fn2(grid, block, (self.outv, self.outl, self.outl2, threshold*5.25/4.0, window))
 
         results = []
         # for batch_idx in range(self.batch_size):
@@ -389,8 +411,7 @@ class CUDAThresholdCluster(_BaseThresholdCluster):
         #     results.append((cv[w], cl[w]))
 
         # slightly faster version
-        cv_filtered, cl_filtered = self.fast_filter.filter_arrays(self.outv[:, :nb], self.outl[:, :nb])
-        return cv_filtered, cl_filtered
+        return self.fast_filter.filter_arrays(self.outv[:, :nb], self.outl[:, :nb], self.outl2[:,:nb])
 
 def _threshold_cluster_factory(*args, **kwargs):
     return CUDAThresholdCluster

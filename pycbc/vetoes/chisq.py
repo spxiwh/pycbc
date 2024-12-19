@@ -376,7 +376,7 @@ class SingleDetPowerChisq(object):
                 logging.info('%s above chisq activation threshold' % num_above)
                 above_indices = indices[above]
                 above_snrv = snrv[above]
-                chisq_out = numpy.zeros(len(indices), dtype=numpy.float32)
+                chisq_out = zeros(len(indices), dtype=numpy.float32).data
                 dof = -100
             else:
                 above_indices = indices
@@ -398,6 +398,54 @@ class SingleDetPowerChisq(object):
             return chisq_out, numpy.repeat(dof, len(indices))# dof * numpy.ones_like(indices)
         else:
             return None, None
+
+    def values_batch(self, corrs, snrvs, snr_norms, psd, indices, templates):
+        """ Calculate the chisq at points given by indices.
+
+        Returns
+        -------
+        chisq: Array
+            Chisq values, one for each sample index, or zero for points below
+            the specified SNR threshold
+
+        chisq_dof: Array
+            Number of statistical degrees of freedom for the chisq test
+            in the given template, equal to 2 * num_bins - 2
+        """
+        import cupy
+        # PLEASE NOTE:
+        # - corrs - 2D cupy array
+        # - snrvs - Ragged list of cupy arrays
+        # - snr_norms - 1D cupy array
+        # - psd - FrequencySeries
+        # - indices - Ragged list of cupy arrays
+        # - templates - list of templates
+        if self.do:
+            if not self.snr_threshold:
+                raise NotImplementedError()
+            num_above = len(indices)
+            logging.info('%s above chisq activation threshold' % num_above)
+            chisq_out = cupy.zeros(len(indices), dtype=numpy.float32)
+            dof = -100
+            num_above = 0
+
+            if num_above > 0:
+                bins = self.cached_chisq_bins(template, psd)
+                # len(bins) is number of bin edges, num_bins = len(bins) - 1
+                dof = (len(bins) - 1) * 2 - 2
+                _chisq = power_chisq_at_points_from_precomputed(corr,
+                                     above_snrv, snr_norm, bins, above_indices)
+
+            if self.snr_threshold:
+                if num_above > 0:
+                    chisq_out[above] = _chisq
+            else:
+                chisq_out = _chisq
+
+            return chisq_out, cupy.repeat(cupy.int32(dof), len(indices))# dof * numpy.ones_like(indices)
+        else:
+            return None, None
+
 
 
 class SingleDetSkyMaxPowerChisq(SingleDetPowerChisq):

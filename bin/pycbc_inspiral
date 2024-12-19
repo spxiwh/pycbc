@@ -284,15 +284,20 @@ def template_triggers(t_nums):
             sigmasqs = [template.sigmasq(stilde.psd) for template in templates]
             print("Sigmasq time: ", time.time() - t_start)
             t_start = time.time()
-            snrs, norms, corrs, idxs, snrvs = \
+            snrs, norms, corrs, idxs, snrvs, snrv_arr, idxv_arr, sizes = \
                 matched_filter.matched_filter_and_cluster(s_num,
                                                         sigmasqs,
                                                         cluster_window,
                                                         epoch=stilde._epoch)
             print("Matched filter time: ", time.time() - t_start)
+            chisqs, chisq_dofs = \
+                power_chisq.values_batch(matched_filter.corr_mem, snrv_arr, norms, stilde.psd,
+                                 idxv_arr + stilde.analyze.start, templates)
+
         else:
             # Process templates one at a time for other schemes
             snrs, norms, corrs, idxs, snrvs, sigmasqs = [], [], [], [], [], []
+            chisqs, chisq_dofs = [], []
             for template in templates:
                 sigmasq = template.sigmasq(stilde.psd)
                 s, n, c, i, sv = \
@@ -300,39 +305,39 @@ def template_triggers(t_nums):
                                                             sigmasq,
                                                             cluster_window,
                                                             epoch=stilde._epoch)
+                chisq, chisq_dof = \
+                    power_chisq.values(c, sv, n, stilde.psd,
+                                      i + stilde.analyze.start, template)
                 snrs.append(s)
                 norms.append(n)
                 corrs.append(c)
                 idxs.append(i)
                 snrvs.append(sv)
                 sigmasqs.append(sigmasq)
+                chisqs.append(chisq)
+                chisq_dofs.append(chisq_dof)
+
 
         # Process results for each template
-        for tidx, (template, snr, norm, corr, idx, snrv) in \
-                enumerate(zip(templates, snrs, norms, corrs, idxs, snrvs)):
+        for tidx, (template, snr, norm, corr, idx, snrv, chisq, chisq_dof) in \
+                enumerate(zip(templates, snrs, norms, corrs, idxs, snrvs, chisqs, chisq_dofs)):
             if not len(idx):
                 continue
             norm = float(norm)
 
             out_vals = out_vals_ref.copy()
-            out_vals['bank_chisq'], out_vals['bank_chisq_dof'] = \
-                bank_chisq.values(template, stilde.psd, stilde, snrv, norm,
-                                idx + stilde.analyze.start)
+            chisq, chisq_dof = \
+                    power_chisq.values(corr, snrv, norm, stilde.psd,
+                                      idx + stilde.analyze.start, template)
 
-            out_vals['chisq'], out_vals['chisq_dof'] = \
-                power_chisq.values(corr, snrv, norm, stilde.psd,
-                                 idx + stilde.analyze.start, template)
+            out_vals['chisq'] = chisq
+            out_vals['chisq_dof'] = chisq_dof
 
             out_vals['sg_chisq'] = sg_chisq.values(stilde, template, stilde.psd,
                                                   snrv, norm,
                                                   out_vals['chisq'],
                                                   out_vals['chisq_dof'],
                                                   idx + stilde.analyze.start)
-
-            out_vals['cont_chisq'], _ = \
-                autochisq.values(snr, idx + stilde.analyze.start, template,
-                               stilde.psd, norm, stilde=stilde,
-                               low_frequency_cutoff=flow)
 
             idx += stilde.cumulative_index
 
