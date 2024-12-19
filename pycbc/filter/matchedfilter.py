@@ -426,20 +426,9 @@ class MatchedFilterControl(object):
             t_start = time.time()
             # Process results for each template in batch
             # Threshold and cluster
-            batched_results = self.threshold_and_clusterers[segnum].threshold_and_cluster(
+            all_snrv, all_idx = self.threshold_and_clusterers[segnum].threshold_and_cluster(
                 self.snr_threshold / norms, window
             )
-
-            # Aggregate results across batches
-            all_idx = []
-            all_snrv = []
-            for snrv_batch, idx_batch in batched_results:
-                if len(idx_batch) == 0:
-                    all_snrv.append([])
-                    all_idx.append([])
-                    continue
-                all_snrv.append(snrv_batch)
-                all_idx.append(idx_batch)
 
             logger.info("%d points above threshold across all batches", sum(len(batch) for batch in all_idx))
 

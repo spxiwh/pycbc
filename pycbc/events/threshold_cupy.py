@@ -390,8 +390,7 @@ class CUDAThresholdCluster(_BaseThresholdCluster):
 
         # slightly faster version
         cv_filtered, cl_filtered = self.fast_filter.filter_arrays(self.outv[:, :nb], self.outl[:, :nb])
-        results = list(zip(cv_filtered, cl_filtered))
-        return results
+        return cv_filtered, cl_filtered
 
 def _threshold_cluster_factory(*args, **kwargs):
     return CUDAThresholdCluster
