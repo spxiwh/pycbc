@@ -60,6 +60,12 @@ def _get_scheme_types():
             'norm': _numpy.linalg.norm
         }
 
+def get_array_backend():
+    if _scheme.current_prefix() == 'cupy':
+        return _cupy
+    else:
+        return _numpy
+
 # Get initial types but allow for later updates
 _types = _get_scheme_types()
 float32 = _types['float32']

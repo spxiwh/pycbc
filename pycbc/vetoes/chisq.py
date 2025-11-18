@@ -23,7 +23,7 @@
 #
 import numpy, logging, math, pycbc.fft
 
-from pycbc.types import zeros, real_same_precision_as, TimeSeries, complex_same_precision_as
+from pycbc.types import zeros, real_same_precision_as, TimeSeries, complex_same_precision_as, get_array_backend
 from pycbc.filter import sigmasq_series, make_frequency_series, matched_filter_core, get_cutoff_indices
 from pycbc.scheme import schemed
 import pycbc.pnutils
@@ -52,11 +52,12 @@ def power_chisq_bins_from_sigmasq_series(sigmasq_series, num_bins, kmin, kmax):
     bins: List of ints
         A list of the edges of the chisq bins is returned.
     """
+    xp = get_array_backend()
     sigmasq = sigmasq_series[kmax - 1]
-    edge_vec = numpy.arange(0, num_bins) * sigmasq / num_bins
-    bins = numpy.searchsorted(sigmasq_series[kmin:kmax], edge_vec, side='right')
+    edge_vec = xp.arange(0, num_bins) * sigmasq / num_bins
+    bins = xp.searchsorted(sigmasq_series[kmin:kmax], edge_vec, side='right')
     bins += kmin
-    return numpy.append(bins, kmax)
+    return xp.append(bins, kmax)
 
 
 def power_chisq_bins(htilde, num_bins, psd, low_frequency_cutoff=None,
@@ -373,7 +374,7 @@ class SingleDetPowerChisq(object):
             if self.snr_threshold:
                 above = abs(snrv * snr_norm) > self.snr_threshold
                 num_above = above.sum()
-                logging.info('%s above chisq activation threshold' % num_above)
+                #logging.info('%s above chisq activation threshold' % num_above)
                 above_indices = indices[above]
                 above_snrv = snrv[above]
                 chisq_out = zeros(len(indices), dtype=numpy.float32).data
@@ -399,7 +400,7 @@ class SingleDetPowerChisq(object):
         else:
             return None, None
 
-    def values_batch(self, corrs, snrvs, snr_norms, psd, indices, templates):
+    def values_batch(self, corrs, snrvs, snr_norms, sizes, template_map, psd, indices, templates):
         """ Calculate the chisq at points given by indices.
 
         Returns
@@ -413,12 +414,15 @@ class SingleDetPowerChisq(object):
             in the given template, equal to 2 * num_bins - 2
         """
         import cupy
+        from .chisq_cupy import shift_sum_batch
         # PLEASE NOTE:
         # - corrs - 2D cupy array
-        # - snrvs - Ragged list of cupy arrays
+        # - snrvs - 1D cupy array
         # - snr_norms - 1D cupy array
+        # - sizes - 1D array of sizes of 2D arrays
+        # - template_map - 1D array mapping position in 1D arrays to 2D index
         # - psd - FrequencySeries
-        # - indices - Ragged list of cupy arrays
+        # - indices - 1D cupy array
         # - templates - list of templates
         if self.do:
             if not self.snr_threshold:
@@ -426,23 +430,42 @@ class SingleDetPowerChisq(object):
             num_above = len(indices)
             logging.info('%s above chisq activation threshold' % num_above)
             chisq_out = cupy.zeros(len(indices), dtype=numpy.float32)
+            chisq_dof_out = cupy.zeros(len(indices), dtype=numpy.int32)
+            chisq_list = []
+            chisq_dof_list = []
             dof = -100
             num_above = 0
 
-            if num_above > 0:
-                bins = self.cached_chisq_bins(template, psd)
-                # len(bins) is number of bin edges, num_bins = len(bins) - 1
-                dof = (len(bins) - 1) * 2 - 2
-                _chisq = power_chisq_at_points_from_precomputed(corr,
-                                     above_snrv, snr_norm, bins, above_indices)
+            # NOTE: Bins is a list of cupy arrays.
+            bins = [self.cached_chisq_bins(template,psd) for template in templates]
+            bin_lengths = cupy.array([len(cbin) for cbin in bins])
+            dof = (bin_lengths - 1) * 2 - 2
 
-            if self.snr_threshold:
-                if num_above > 0:
-                    chisq_out[above] = _chisq
-            else:
-                chisq_out = _chisq
 
-            return chisq_out, cupy.repeat(cupy.int32(dof), len(indices))# dof * numpy.ones_like(indices)
+            #num_bins = len(bins) - 1 # This would have to become a len(chisq) array
+            chisq = shift_sum_batch(corrs, indices, bins, bin_lengths, template_map)
+            #chisq_out[:] = (chisq * num_bins - (snr.conj() * snr).real) * (snr_norm ** 2.0)
+
+
+            #if self.snr_threshold:
+            #    if num_above > 0:
+            #        chisq_out[above] = _chisq
+            #else:
+            #    chisq_out = _chisq
+            start = 0
+            for idx, size in enumerate(sizes):
+                size = int(size)
+                if size > 0:
+                    chisq_list.append(chisq_out[start:start + size])
+                    chisq_dof_out[start:start + size] += dof[idx]
+                    chisq_dof_list.append(chisq_dof_out[start:start + size])
+                else:
+                    chisq_list.append(cp.empty(0, dtype=float32))
+                    chisq_dof_list.append(cp.empty(0, dtype=cp.int32))
+                start += size
+
+
+            return chisq_list, chisq_dof_list
         else:
             return None, None
 

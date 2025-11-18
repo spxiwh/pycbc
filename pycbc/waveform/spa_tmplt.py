@@ -26,6 +26,7 @@ import warnings
 import numpy, lal, pycbc.pnutils
 from pycbc.scheme import schemed
 from pycbc.types import FrequencySeries, Array, complex64, float32, zeros
+from pycbc.types import get_array_backend
 from pycbc.waveform.utils import ceilpow2
 
 lalsimulation = pycbc.libutils.import_optional('lalsimulation')
@@ -135,8 +136,9 @@ def spa_tmplt_precondition(length, delta_f, kmin=0):
 def spa_tmplt_norm(psd, length, delta_f, f_lower):
     amp = spa_tmplt_precondition(length, delta_f)
     k_min = int(f_lower / delta_f)
-    sigma = (amp[k_min:length].numpy() ** 2. / psd[k_min:length].numpy())
-    norm_vec = numpy.zeros(length)
+    sigma = (amp.data[k_min:length] ** 2. / psd.data[k_min:length])
+    xp = get_array_backend()
+    norm_vec = xp.zeros(length)
     norm_vec[k_min:length] = sigma.cumsum() * 4. * delta_f
     return norm_vec
 

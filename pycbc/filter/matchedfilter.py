@@ -426,7 +426,7 @@ class MatchedFilterControl(object):
             t_start = time.time()
             # Process results for each template in batch
             # Threshold and cluster
-            all_snrv, all_idx, snrv_arr, idxv_arr, sizes = self.threshold_and_clusterers[segnum].threshold_and_cluster(
+            all_snrv, all_idx, snrv_arr, idxv_arr, sizes, template_map = self.threshold_and_clusterers[segnum].threshold_and_cluster(
                 self.snr_threshold / norms, window
             )
 
@@ -436,7 +436,7 @@ class MatchedFilterControl(object):
             snr = [TimeSeries(snr, epoch=epoch, delta_t=self.delta_t, copy=False) for snr in self.snr_mem]
             corr = [FrequencySeries(corr, delta_f=self.delta_f, copy=False) for corr in self.corr_mem]
 
-            return snr, norms, corr, all_idx, all_snrv, snrv_arr, idxv_arr, sizes
+            return snr, norms, corr, all_idx, all_snrv, snrv_arr, idxv_arr, sizes, template_map
 
     def full_matched_filter_and_cluster_fc(self, segnum, template_norms, window, epoch=None):
         """FindChirp clustering version of the matched filter

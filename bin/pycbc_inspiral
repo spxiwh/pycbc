@@ -284,14 +284,14 @@ def template_triggers(t_nums):
             sigmasqs = [template.sigmasq(stilde.psd) for template in templates]
             print("Sigmasq time: ", time.time() - t_start)
             t_start = time.time()
-            snrs, norms, corrs, idxs, snrvs, snrv_arr, idxv_arr, sizes = \
+            snrs, norms, corrs, idxs, snrvs, snrv_arr, idxv_arr, sizes, template_map = \
                 matched_filter.matched_filter_and_cluster(s_num,
                                                         sigmasqs,
                                                         cluster_window,
                                                         epoch=stilde._epoch)
             print("Matched filter time: ", time.time() - t_start)
             chisqs, chisq_dofs = \
-                power_chisq.values_batch(matched_filter.corr_mem, snrv_arr, norms, stilde.psd,
+                power_chisq.values_batch(matched_filter.corr_mem, snrv_arr, norms, sizes, template_map, stilde.psd,
                                  idxv_arr + stilde.analyze.start, templates)
 
         else:
@@ -326,12 +326,8 @@ def template_triggers(t_nums):
             norm = float(norm)
 
             out_vals = out_vals_ref.copy()
-            chisq, chisq_dof = \
-                    power_chisq.values(corr, snrv, norm, stilde.psd,
-                                      idx + stilde.analyze.start, template)
-
-            out_vals['chisq'] = chisq
-            out_vals['chisq_dof'] = chisq_dof
+            out_vals['chisq'] = chisq.copy()
+            out_vals['chisq_dof'] = chisq_dof.copy()
 
             out_vals['sg_chisq'] = sg_chisq.values(stilde, template, stilde.psd,
                                                   snrv, norm,
@@ -343,7 +339,7 @@ def template_triggers(t_nums):
 
             out_vals['time_index'] = idx
             out_vals['snr'] = snrv * norm
-            out_vals['sigmasq'] = numpy.zeros(len(snrv), dtype=float32) + sigmasqs[tidx]
+            out_vals['sigmasq'] = zeros(len(snrv), dtype=float32).data + sigmasqs[tidx]
             
             if opt.psdvar_short_segment is not None:
                 out_vals['psd_var_val'] = \
@@ -352,7 +348,7 @@ def template_triggers(t_nums):
                                                opt.gps_start_time,
                                                opt.sample_rate)
 
-            out_vals_all[tidx].append(copy.deepcopy(out_vals))
+            out_vals_all[tidx].append(out_vals)
 
     return out_vals_all, tparams
 

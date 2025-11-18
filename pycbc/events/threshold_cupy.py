@@ -233,6 +233,7 @@ def threshold_and_cluster(series_batch, threshold, window):
     grid = (nb, batch_size, 1)
     block = (nt, 1, 1)
 
+    # FIXME: I'm convinced that fn2 should not be taking the same grid and block
     fn(grid, block, (series_batch.data, outv, outl, window, threshold, series_length))
     fn2(grid, block, (outv, outl, threshold, window))
     
@@ -291,7 +292,7 @@ class FastFilter:
         self.sizes = cp.empty(snum, dtype=cp.int32)
         self.sizes2 = cp.empty(snum, dtype=cp.int32)
         self.offsets = cp.empty(snum, dtype=cp.int32)
-        self.offsets2 = cp.empty(snum, dtype=cp.int32)
+        #self.offsets2 = cp.empty(snum, dtype=cp.int32)
         
     def filter_arrays(self, cv, cl, cl2):
         # Input handling
@@ -307,7 +308,7 @@ class FastFilter:
             if cl.shape != (self.snum, self.nb):
                 raise ValueError(f"Expected shape ({self.snum}, {self.nb}), got {cl.shape}")
             cl = cl.reshape(-1)
-            cl2 = cl2.reshape(-1)
+        #    cl2 = cl2.reshape(-1)
             
         # Compute sizes
         n_threads = (self.snum + 1023) // 1024
@@ -315,19 +316,20 @@ class FastFilter:
         
         self.size_kernel((blocks,), (n_threads,),
                         (cv, cl, self.sizes, self.nb, self.snum))
-        self.size_kernel((blocks,), (n_threads,),
-                        (cv, cl2, self.sizes2, self.nb, self.snum))
+        #self.size_kernel((blocks,), (n_threads,),
+        #                (cv, cl2, self.sizes2, self.nb, self.snum))
 
         # Compute offsets
         cp.cumsum(self.sizes[:-1], out=self.offsets[1:])
         self.offsets[0] = 0
-        cp.cumsum(self.sizes2[:-1], out=self.offsets2[1:])
-        self.offsets2[0] = 0
+        #cp.cumsum(self.sizes2[:-1], out=self.offsets2[1:])
+        #self.offsets2[0] = 0
         
         # Allocate output arrays
         total_size = int(self.sizes.sum())
         cv_out = cp.empty(total_size, dtype=cp.complex64)
         cl_out = cp.empty(total_size, dtype=cp.int32)
+        template_map = cp.empty(total_size, dtype=cp.int32)
         
 
         # Run filter kernel
@@ -340,21 +342,22 @@ class FastFilter:
         cv_filtered = []
         cl_filtered = []
         start = 0
-        for size in self.sizes:
+        for idx, size in enumerate(self.sizes):
             size = int(size)
             if size > 0:
                 cv_filtered.append(cv_out[start:start + size])
                 cl_filtered.append(cl_out[start:start + size])
+                template_map[start:start + size] = idx
             else:
                 cv_filtered.append(cp.empty(0, dtype=cp.complex64))
                 cl_filtered.append(cp.empty(0, dtype=cp.int32))
             start += size
         # Second pass gets triggers that will need chisq later
-        self.filter_kernel((blocks,), (n_threads,),
-                          (cv, cl2, cv_out, cl_out,
-                           self.sizes2, self.offsets2,
-                           self.nb, self.snum))
-        return cv_filtered, cl_filtered, cv_out, cl_out, self.sizes
+        #self.filter_kernel((blocks,), (n_threads,),
+        #                  (cv, cl2, cv_out, cl_out,
+        #                   self.sizes2, self.offsets2,
+        #                   self.nb, self.snum))
+        return cv_filtered, cl_filtered, cv_out, cl_out, self.sizes, template_map
 
 class CUDAThresholdCluster(_BaseThresholdCluster):
     def __init__(self, series_batch, analyse_slice):
