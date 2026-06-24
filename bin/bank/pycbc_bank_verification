@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/opt/homebrew/Caskroom/miniconda/base/envs/pycbc_test_py312/bin/python3.12
 
 # Copyright (C) 2011 Ian W. Harry
 #
@@ -55,6 +55,9 @@ parser.add_argument("--histogram-output-file", action="store", default=None,
                     "supplied file. If not given no histogram is produced.")
 parser.add_argument("--print-distances", action="store_true", default=False,
                     help="Print details about the match of each point.")
+parser.add_argument("--print-distances-maxmatch", action="store", default=1.,
+                    type=float,
+                    help="Only print matches if smaller than this value.")
 parser.add_argument("-B", "--input-bank", action="store", required=True,
                     help="The template bank to use an input.")
 parser.add_argument("-V", "--vary-fupper", action="store_true", default=False,
@@ -96,6 +99,12 @@ parser.add_argument("--bin-spacing", action="store", type=float,
                     "mismatch, the width of these bins. Note that metric "
                     "distance is proportional to the square root of the "
                     "mismatch.")
+parser.add_argument("--plot-missed-points", type=int, default=0,
+                    help="If --print-distances is on, plot the first N points "
+                    "with matches below --print-distances-maxmatch in xi1, xi2 "
+                    "coordinate space, centered on each missed point with a "
+                    "half-width of 2, showing all nearby bank templates. "
+                    "OPTIONAL, default=0.")
 
 # Insert the metric calculation options
 tmpltbank.insert_metric_calculation_options(parser)
@@ -192,12 +201,20 @@ if opts.input_bank.endswith(('.xml','.xml.gz','.xmlgz')):
     indoc = ligolw_utils.load_filename(opts.input_bank,
                                        contenthandler=LIGOLWContentHandler)
     template_list = lsctables.SnglInspiralTable.get_table(indoc)
+    bank_m1 = numpy.array([t.mass1 for t in template_list])
+    bank_m2 = numpy.array([t.mass2 for t in template_list])
+    bank_s1z = numpy.array([t.spin1z for t in template_list])
+    bank_s2z = numpy.array([t.spin2z for t in template_list])
 
     partitioned_bank_object.add_tmpltbank_from_xml_table\
         (template_list, vary_fupper=opts.vary_fupper)
 
 elif opts.input_bank.endswith(('.h5','.hdf','.hdf5')):
     h5_fp = HFile(opts.input_bank, 'r')
+    bank_m1 = h5_fp['mass1'][:]
+    bank_m2 = h5_fp['mass2'][:]
+    bank_s1z = h5_fp['spin1z'][:]
+    bank_s2z = h5_fp['spin2z'][:]
     partitioned_bank_object.add_tmpltbank_from_hdf_file\
         (h5_fp, vary_fupper=opts.vary_fupper)
 else:
@@ -224,7 +241,7 @@ if opts.point_file:
     opts.num_points = len(rMass1)
 else:
     rMass1, rMass2, rSpin1z, rSpin2z =\
-        tmpltbank.get_random_mass(100000, massRangeParams)
+        tmpltbank.get_random_mass(opts.num_points, massRangeParams)
 
 if opts.vary_fupper:
     mass_dict = {}
@@ -242,8 +259,8 @@ if opts.vary_fupper:
             mus.append(tmpltbank.get_mu_params(lambdas, metricParams, freq))
     mus = numpy.array(mus)
 else:
-    refEve = numpy.zeros(100000)
-    mus = numpy.zeros([1,1,100000])
+    refEve = numpy.zeros(opts.num_points)
+    mus = numpy.zeros([1,1,opts.num_points])
 vecs = tmpltbank.get_cov_params(rMass1, rMass2, rSpin1z, rSpin2z,
                                 metricParams, refFreq)
 vecs = numpy.array(vecs)
@@ -276,6 +293,11 @@ points_fittingfactor = numpy.array(points_fittingfactor)
 
 logging.info("Distances calculated.")
 
+if opts.plot_missed_points > 0:
+    bank_vecs = tmpltbank.get_cov_params(bank_m1, bank_m2, bank_s1z, bank_s2z, metricParams, refFreq)
+    bank_xi1 = bank_vecs[0]
+    bank_xi2 = bank_vecs[1]
+
 if opts.histogram_output_file:
     plt.hist(points_fittingfactor, 100)
     plt.xlabel("Fitting factor")
@@ -284,11 +306,45 @@ if opts.histogram_output_file:
 
 if opts.print_distances:
     print()
+    num_plotted = 0
     for idx in range(len(points_mass1)):
+        if points_fittingfactor[idx] > opts.print_distances_maxmatch:
+            continue
         print("The test point with the following parameters (m1,m2,S1z,S2z)")
         print("%e %e %e %e" %(points_mass1[idx], points_mass2[idx],\
                               points_spin1z[idx], points_spin2z[idx]))
+        
+        p_xi1 = points_xis[idx][0]
+        p_xi2 = points_xis[idx][1]
+        print("And xi1, xi2 values of %e %e" %(p_xi1, p_xi2))
+        
         print("Was recovered with an overlap of %e" %(points_fittingfactor[idx]))
+        
+        # Plot if requested
+        if num_plotted < opts.plot_missed_points:
+            fig, ax = plt.subplots(figsize=(8, 6))
+            
+            # Mask templates to within a generous range (e.g. 5) to save plotting time,
+            # though matplotlib can handle clipping easily
+            mask = (bank_xi1 >= p_xi1 - 2.5) & (bank_xi1 <= p_xi1 + 2.5) & \
+                   (bank_xi2 >= p_xi2 - 2.5) & (bank_xi2 <= p_xi2 + 2.5)
+            
+            ax.scatter(bank_xi1[mask], bank_xi2[mask], s=10, c='blue', alpha=0.5, label='Templates')
+            ax.scatter([p_xi1], [p_xi2], s=50, c='red', marker='x', label=f'Missed Point\n$\\xi_1={p_xi1:.3f}$, $\\xi_2={p_xi2:.3f}$')
+            
+            ax.set_xlim(p_xi1 - 2, p_xi1 + 2)
+            ax.set_ylim(p_xi2 - 2, p_xi2 + 2)
+            ax.set_xlabel(r'$\xi_1$')
+            ax.set_ylabel(r'$\xi_2$')
+            ax.set_title(f'Missed Point {num_plotted} (Match: {points_fittingfactor[idx]:.4f})')
+            ax.legend()
+            
+            plot_filename = f'plots/missed_point_{num_plotted}.png'
+            fig.savefig(plot_filename)
+            plt.close(fig)
+            print(f"Saved diagnostic plot to {plot_filename}")
+            num_plotted += 1
+
         if points_closestidxes[idx] is None:
             print("No template was within a metric distance of 1.")
             print()

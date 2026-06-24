@@ -87,10 +87,10 @@ for inp_file in input_files:
     data = inp_fp['accepted_templates'][:]
     if len(data) == 0:
         continue
-    mass1.extend(data[:,0])
-    mass2.extend(data[:,1])
-    spin1z.extend(data[:,2])
-    spin2z.extend(data[:,3])
+    mass1.extend(data[:,1])
+    mass2.extend(data[:,2])
+    spin1z.extend(data[:,3])
+    spin2z.extend(data[:,4])
     inp_fp.close()
 
 temp_bank = numpy.array([mass1,mass2,spin1z,spin2z]).T
