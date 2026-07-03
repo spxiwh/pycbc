@@ -279,6 +279,11 @@ def insert_psd_option_group(parser, output=True, include_data_options=True):
     psd_options.add_argument("--psdvar-high-freq", type=float, metavar="HERTZ",
                              help="Maximum frequency to consider in strain "
                              "bandpass.")
+    psd_options.add_argument("--psdvar-freq-dependent", action="store_true",
+                             help="Calculate frequency dependent PSD variation.")
+    psd_options.add_argument("--psdvar-freq-bins", type=str,
+                             help="Comma separated list of frequency bin edges for "
+                                  "frequency dependent PSD variation.")
 
     if include_data_options :
         psd_options.add_argument("--psd-estimation",
@@ -418,6 +423,11 @@ def insert_psd_option_group_multi_ifo(parser):
     psd_options.add_argument("--psdvar-high-freq", type=float, metavar="HERTZ",
                              help="Maximum frequency to consider in strain "
                              "bandpass.")
+    psd_options.add_argument("--psdvar-freq-dependent", action="store_true",
+                             help="Calculate frequency dependent PSD variation.")
+    psd_options.add_argument("--psdvar-freq-bins", type=str,
+                             help="Comma separated list of frequency bin edges for "
+                                  "frequency dependent PSD variation.")
 
     return psd_options
 

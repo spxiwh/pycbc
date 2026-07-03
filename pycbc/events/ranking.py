@@ -4,12 +4,6 @@ statistic values
 import logging
 import numpy
 
-from pycbc.types import TimeSeries, complex_same_precision_as
-from pycbc.filter import make_frequency_series, matched_filter_core
-from pycbc.fft import ifft
-from pycbc.vetoes import power_chisq_at_points_from_precomputed
-from pycbc.psd.variation import get_psdvar_f_bins
-
 logger = logging.getLogger('pycbc.events.ranking')
 
 
@@ -398,63 +392,4 @@ def get_sngls_ranking_from_trigs(trigs, statname, **kwargs):
     # NOTE: In the sngl_funcs all the kwargs are explicitly stated, so any
     #       kwargs sent here must be known to the function.
     return sngl_func(trigs, **kwargs)
-
-
-def snr_freq_psdvar_chisq(var_dict, template, data, psd, chisq_nbins, sample_rate, low_freq, high_freq, var_threshold=1.6):
-    '''
-    corrects the snr according to the frequency dependent psd variation and Bruce Allen chisq
-    
-    inputs:
-           template = merger template: TimeSeries
-           data = strain data: TimeSeries
-           psd = psd of the strain data: FrequencySeries
-           var_nbins = number of frequency bins for the psd variation: int
-           chisq_nbins = number of frequency bins for the chisq: int
-           low_freq = lower bound on frequency of data in Hertz: float (default: 20Hz)
-           high_freq = upper bound on frequency of data in Hertz: float (default: 480Hz)
-           
-    output:
-           new snr corrected by frequency dependent psd variation and chi squared
-           
-    '''
-    stilde = make_frequency_series(data)
-    N = (len(stilde) - 1) * 2
-    noise_times = {
-        k: [(i,x) for i,x in enumerate(v) if x>var_threshold]
-        for k, v in var_dict.items()
-        if any(x > var_threshold for x in v)
-    }
-    var_nbins = len(list(var_dict.values())[0])
-    var_bins, _ = get_psdvar_f_bins(var_nbins, template, psd, low_freq, high_freq)
-    bin_diffs = numpy.diff(var_bins)
-    chisq_bins, _ = get_psdvar_f_bins(chisq_nbins, template, psd, low_freq, high_freq)
-    snr, corr, norm = matched_filter_core(template, 
-                                      data, 
-                                      psd, 
-                                      low_freq,
-                                      high_freq)
-    snr_normed = snr * norm
-    q = numpy.zeros(N, dtype=complex_same_precision_as(data))
-    q = TimeSeries(q, epoch=stilde._epoch, delta_t=stilde.delta_t, copy=False)
-    corrected_snr = snr.copy()
-    
-    # NOTE: chisq is not defined here yet, left as originally written for debugging later
-    corrected_chisq = chisq.copy().numpy()
-    
-    for t in noise_times:
-        corr_v = corr.copy()
-        for x in noise_times[t]:
-            # NOTE: fbins and delta_f are not defined here yet, left as originally written for debugging later
-            corr_v[int(fbins[x[0]]/delta_f):int(fbins[x[0]+1]/delta_f)] /= numpy.sqrt(x[1])
-        q = numpy.zeros(N, dtype=complex_same_precision_as(data))
-        q = TimeSeries(q, epoch=stilde._epoch, delta_t=stilde.delta_t, copy=False)
-        ifft(corr_v / stilde.delta_f, q)
-        q_normed = q * norm
-        chisq_v = power_chisq_at_points_from_precomputed(corr_v, numpy.array(q), norm, chisq_bins, indices=numpy.array([(t-0.5+i)*sample_rate]))
-        chisq_v /= (2 * len(chisq_bins)) - 2
-        corrected_chisq[int((t-0.5)*sample_rate):int((t+0.5)*sample_rate)] = chisq_v[int((t-0.5)*sample_rate):int((t+0.5)*sample_rate)]
-        corrected_snr[int((t-0.5)*sample_rate):int((t+0.5)*sample_rate)] = q_normed[int((t-0.5)*sample_rate):int((t+0.5)*sample_rate)]
-        
-    nsnr = newsnr(corrected_snr, corrected_chisq)
-    return nsnr
 

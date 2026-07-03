@@ -362,10 +362,21 @@ with ctx:
     # FIXME: Maybe we should use the PSD corresponding to each trigger
     if opt.psdvar_segment is not None:
         logging.info("Calculating PSD variation")
-        psd_var = pycbc.psd.calc_filt_psd_variation(gwstrain, opt.psdvar_segment,
+        
+        fbins = None
+        if opt.psdvar_freq_dependent and opt.psdvar_freq_bins:
+            fbins = [float(f) for f in opt.psdvar_freq_bins.split(',')]
+            
+        psd_var = pycbc.psd.variation.calc_psd_variation(gwstrain, opt.psdvar_segment,
                 opt.psdvar_short_segment, opt.psdvar_long_segment,
                 opt.psdvar_psd_duration, opt.psdvar_psd_stride,
-                opt.psd_estimation, opt.psdvar_low_freq, opt.psdvar_high_freq)
+                opt.psd_estimation, opt.psdvar_low_freq, opt.psdvar_high_freq,
+                frequency_dependent=opt.psdvar_freq_dependent, fbins=fbins)
+
+        # Disable storing PSD variation numbers into events if we're using frequency-dependent
+        if opt.psdvar_freq_dependent:
+            logging.info("Frequency dependent PSD variation generated. Standard PSD variation output disabled.")
+            opt.psdvar_segment = None
 
 
     if opt.enable_q_transform:
