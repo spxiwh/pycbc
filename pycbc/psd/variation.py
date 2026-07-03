@@ -6,7 +6,10 @@ import scipy.signal as sig
 from scipy.interpolate import interp1d
 
 import pycbc.psd
+from pycbc.psd import interpolate
 from pycbc.types import TimeSeries
+from pycbc.filter import make_frequency_series
+from pycbc.vetoes import power_chisq_bins
 
 
 def create_full_filt(freqs, filt, plong, srate, psd_duration):
@@ -47,7 +50,7 @@ def create_full_filt(freqs, filt, plong, srate, psd_duration):
     return full_filt
 
 
-def mean_square(data, delta_t, srate, short_stride, stride):
+def mean_square(data, delta_t, srate, short_stride, stride, glitch_remover=True):
     """ Calculate mean square of given time series once per stride
 
     First of all this function calculate the mean square of given time
@@ -82,9 +85,10 @@ def mean_square(data, delta_t, srate, short_stride, stride):
     short_ms = numpy.mean(data.reshape(-1, int(srate * short_stride)) ** 2,
                           axis=1)
     # Define an array of averages that is used to substitute outliers
-    ave = 0.5 * (short_ms[2:] + short_ms[:-2])
-    outliers = short_ms[1:-1] > (2. * ave)
-    short_ms[1:-1][outliers] = ave[outliers]
+    if glitch_remover:
+        ave = 0.5 * (short_ms[2:] + short_ms[:-2])
+        outliers = short_ms[1:-1] > (2. * ave)
+        short_ms[1:-1][outliers] = ave[outliers]
 
     # Calculate mean square of data every step within a window equal to
     # stride seconds
@@ -98,7 +102,7 @@ def mean_square(data, delta_t, srate, short_stride, stride):
 
 def calc_filt_psd_variation(strain, segment, short_segment, psd_long_segment,
                             psd_duration, psd_stride, psd_avg_method, low_freq,
-                            high_freq):
+                            high_freq, glitch_remover=True):
     """ Calculates time series of PSD variability
 
     This function first splits the segment up into 512 second chunks. It
@@ -198,7 +202,7 @@ def calc_filt_psd_variation(strain, segment, short_segment, psd_long_segment,
         wstrain = wstrain[int(strain_crop * srate):-int(strain_crop * srate)]
         # compute the mean square of the chunk of data
         delta_t = len(wstrain) * strain.delta_t
-        variation = mean_square(wstrain, delta_t, srate, short_segment, segment)
+        variation = mean_square(wstrain, delta_t, srate, short_segment, segment, glitch_remover=glitch_remover)
         psd_var_list.append(numpy.array(variation, dtype=wstrain.dtype))
 
     # Package up the time series to return
@@ -206,6 +210,110 @@ def calc_filt_psd_variation(strain, segment, short_segment, psd_long_segment,
                          epoch=start_time + strain_crop + segment)
 
     return psd_var
+
+
+def get_psdvar_f_bins(nbins, template, psd, low_freq, high_freq):
+    '''
+    finds the edges of the chisq frequency bins
+
+    Parameters:
+    -----------
+    nbins : int
+        number of frequency bins
+    template : TimeSeries
+        merger template
+    psd : FrequencySeries
+        psd of the strain data
+    low_freq : float
+        lower bound on frequency of data in Hertz
+    high_freq : float
+        upper bound on frequency of data in Hertz
+
+    Returns:
+    --------
+    bins : list
+        indices of the frequency bin edges
+    fbins : list
+        frequency values of the frequency bin edges (Hz)
+    '''
+    htilde = make_frequency_series(template)
+    psd_interp = interpolate(psd, htilde.delta_f)
+    bins = power_chisq_bins(htilde,
+                            nbins,
+                            psd_interp,
+                            low_freq,
+                            high_freq)
+    fbins = bins * template.delta_f
+    return bins, fbins
+
+
+def get_psdvar_freq_dict(data, fbins, segment=8., short_segment=0.25,
+                         psd_long_segment=512., psd_duration=8., psd_stride=4.,
+                         psd_avg_method='median', glitch_remover=True):
+    '''
+    makes a dictionary of psd variation across frequencies
+
+    Parameters:
+    -----------
+    data : TimeSeries
+        strain data
+    fbins : array
+        edges of the frequency bins (Hz)
+    segment : float, optional
+    short_segment : float, optional
+    psd_long_segment : float, optional
+    psd_duration : float, optional
+    psd_stride : float, optional
+    psd_avg_method : string, optional
+    glitch_remover : bool, optional
+
+    Returns:
+    --------
+    var_dict: dict
+        the psd variation in each frequency bin per timestamp {timestamp (float): non-stationarity (list) }
+    '''
+    var_dict_raw = {}
+    # calculate psd variation for each frequency bin
+    for f in range(len(fbins)-1):
+        var = calc_filt_psd_variation(
+            data, segment, short_segment, psd_long_segment,
+            psd_duration, psd_stride, psd_avg_method,
+            low_freq=fbins[f], high_freq=fbins[f+1],
+            glitch_remover=glitch_remover
+        )
+        var_dict_raw[fbins[f]] = var
+
+    # put in format {time: [variations]}
+    timestamps = var_dict_raw[fbins[0]].sample_times.numpy()
+    var_array = numpy.array([v.numpy() for v in var_dict_raw.values()])  # shape: (F, T)
+    
+    var_dict = {
+        float(timestamps[i]): var_array[:, i]
+        for i in range(len(timestamps))
+    }
+    return var_dict
+
+
+def calc_psd_variation(strain, segment=8., short_segment=0.25, psd_long_segment=512.,
+                       psd_duration=8., psd_stride=4., psd_avg_method='median',
+                       low_freq=20., high_freq=480., glitch_remover=True,
+                       frequency_dependent=False, fbins=None):
+    """ High-level wrapper function to calculate PSD drift either wide-band or frequency dependent.
+    
+    If frequency_dependent is True, fbins must be provided. Returns a var_dict. 
+    Otherwise, returns a single TimeSeries.
+    """
+    if frequency_dependent:
+        if fbins is None:
+            raise ValueError("fbins must be provided if frequency_dependent is True")
+        return get_psdvar_freq_dict(strain, fbins, segment=segment, short_segment=short_segment,
+                                    psd_long_segment=psd_long_segment, psd_duration=psd_duration, 
+                                    psd_stride=psd_stride, psd_avg_method=psd_avg_method,
+                                    glitch_remover=glitch_remover)
+    else:
+        return calc_filt_psd_variation(strain, segment, short_segment, psd_long_segment,
+                                       psd_duration, psd_stride, psd_avg_method, low_freq,
+                                       high_freq, glitch_remover=glitch_remover)
 
 
 def find_trigger_value(psd_var, idx, start, sample_rate):
