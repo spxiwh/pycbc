@@ -294,22 +294,35 @@ def get_psdvar_freq_dict(data, fbins, segment=8., short_segment=0.25,
     return var_dict
 
 
+class FrequencyDependentPSDVariation(object):
+    def __init__(self, var_dict, fbins):
+        self.var_dict = var_dict
+        self.fbins = fbins
+        
+    def items(self):
+        return self.var_dict.items()
+
 def calc_psd_variation(strain, segment=8., short_segment=0.25, psd_long_segment=512.,
                        psd_duration=8., psd_stride=4., psd_avg_method='median',
                        low_freq=20., high_freq=480., glitch_remover=True,
-                       frequency_dependent=False, fbins=None):
+                       frequency_dependent=False, fbins=None, nbins=10):
     """ High-level wrapper function to calculate PSD drift either wide-band or frequency dependent.
     
-    If frequency_dependent is True, fbins must be provided. Returns a var_dict. 
+    If frequency_dependent is True, returns a FrequencyDependentPSDVariation object containing
+    var_dict and fbins. If fbins is None, defaults to `nbins` geometrically spaced bins between 
+    low_freq and high_freq.
     Otherwise, returns a single TimeSeries.
     """
     if frequency_dependent:
         if fbins is None:
-            raise ValueError("fbins must be provided if frequency_dependent is True")
-        return get_psdvar_freq_dict(strain, fbins, segment=segment, short_segment=short_segment,
+            # Default internal calculation
+            fbins = numpy.geomspace(low_freq, high_freq, nbins + 1)
+        
+        var_dict = get_psdvar_freq_dict(strain, fbins, segment=segment, short_segment=short_segment,
                                     psd_long_segment=psd_long_segment, psd_duration=psd_duration, 
                                     psd_stride=psd_stride, psd_avg_method=psd_avg_method,
                                     glitch_remover=glitch_remover)
+        return FrequencyDependentPSDVariation(var_dict, fbins)
     else:
         return calc_filt_psd_variation(strain, segment, short_segment, psd_long_segment,
                                        psd_duration, psd_stride, psd_avg_method, low_freq,

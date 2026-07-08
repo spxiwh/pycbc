@@ -30,6 +30,7 @@ from pycbc import vetoes, psd, waveform, strain, scheme, fft, DYN_RANGE_FAC, eve
 from pycbc.vetoes.sgchisq import SingleDetSGChisq
 from pycbc.filter import MatchedFilterControl, qtransform
 from pycbc.types import zeros, float32, complex64
+from numpy import int64
 import pycbc.opt
 import pycbc.inject
 
@@ -275,38 +276,42 @@ def template_triggers(t_num):
                                 idx+stilde.analyze.start)
 
         # Apply frequency-dependent correction to corr for chisq if needed
-        if opt.psdvar_freq_dependent and fbins is not None:
+        print("OUTSIDE PSDVAR")
+        if opt.psdvar_freq_dependent:
+            print("FD PSDVAR GOING")
             chisq_combined = numpy.zeros(len(idx), dtype=float32)
-            chisq_dof_combined = numpy.zeros(len(idx), dtype=int)
+            chisq_dof_combined = numpy.zeros(len(idx), dtype=int64)
             
             segment_start = float(stilde._epoch)
             
+            # Using 1.6 as the var_threshold default hardcode until a CLI arg is added
+            var_threshold = VAR_THRESHOLD
+            
             for trig_i, trig_idx in enumerate(idx):
+                print("TRIGGER", trig_idx)
                 t_trig = segment_start + (trig_idx * stilde.delta_t)
                 
-                # Check if this trigger falls into a noisy window
                 corr_v = corr.copy()
                 for t, v in psd_var.items():
                     if float(t) - 0.5 <= t_trig < float(t) + 0.5:
-                        for (bin_i, v_val) in [(i, x) for i, x in enumerate(v) if x > 1.6]:
-                            f_start_idx = int(fbins[bin_i] / stilde.delta_f)
-                            f_end_idx = int(fbins[bin_i+1] / stilde.delta_f)
+                        for (bin_i, v_val) in [(i, x) for i, x in enumerate(v) if x > var_threshold]:
+                            print("PSD VARRING", t, bin_i, v_val)
+                            f_start_idx = int(psd_var.fbins[bin_i] / stilde.delta_f)
+                            f_end_idx = int(psd_var.fbins[bin_i+1] / stilde.delta_f)
                             f_end_idx = min(f_end_idx, len(corr_v))
                             if f_start_idx < len(corr_v):
                                 corr_v[f_start_idx:f_end_idx] /= numpy.sqrt(v_val)
 
-                # Compute chisq for just this point using patched corr_v
                 trig_snrv = numpy.array([snrv[trig_i]])
                 trig_idx_arr = numpy.array([trig_idx + stilde.analyze.start])
                 
                 c_val, c_dof = power_chisq.values(corr_v, trig_snrv, norm, stilde.psd,
                                                   trig_idx_arr, template)
                 chisq_combined[trig_i] = c_val[0]
-                chisq_dof_combined[trig_i] = c_dof
+                chisq_dof_combined[trig_i] = c_dof[0]
                 
             out_vals['chisq'] = chisq_combined
-            out_vals['chisq_dof'] = chisq_dof_combined[0] if len(chisq_dof_combined) else 0
-
+            out_vals['chisq_dof'] = chisq_dof_combined
         else:
             out_vals['chisq'], out_vals['chisq_dof'] = \
                   power_chisq.values(corr, snrv, norm, stilde.psd,
@@ -401,6 +406,7 @@ with ctx:
         if opt.psdvar_freq_dependent and opt.psdvar_freq_bins:
             fbins = [float(f) for f in opt.psdvar_freq_bins.split(',')]
             
+        # If fbins is None here, calc_psd_variation will internally compute geometrically spaced bins
         psd_var = pycbc.psd.variation.calc_psd_variation(gwstrain, opt.psdvar_segment,
                 opt.psdvar_short_segment, opt.psdvar_long_segment,
                 opt.psdvar_psd_duration, opt.psdvar_psd_stride,
@@ -468,9 +474,10 @@ with ctx:
                                    gpu_callback_method=opt.gpu_callback_method,
                                    cluster_function=opt.cluster_function)
 
-    # Note: `psd_var` inside pycbc_inspiral is stored as `psd_var_dict` conceptually if opt.psdvar_freq_dependent
-    if opt.psdvar_freq_dependent and fbins is not None:
-        matched_filter.set_psd_variation(psd_var, fbins, gwstrain.sample_rate)
+    # Note: `psd_var` inside pycbc_inspiral is stored as an object with `var_dict` and `fbins` if opt.psdvar_freq_dependent
+    VAR_THRESHOLD=1.1
+    if opt.psdvar_freq_dependent:
+        matched_filter.set_psd_variation(psd_var.var_dict, psd_var.fbins, gwstrain.sample_rate, var_threshold=VAR_THRESHOLD)
 
     bank_chisq = vetoes.SingleDetBankVeto(opt.bank_veto_bank_file,
                                           flen, delta_f, flow, complex64,

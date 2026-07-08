@@ -240,7 +240,7 @@ class MatchedFilterControl(object):
         else:
             raise ValueError("Invalid downsample factor")
 
-    def set_psd_variation(self, var_dict, fbins, sample_rate, var_threshold=1.6):
+    def set_psd_variation(self, var_dict, fbins, sample_rate, var_threshold=0.1):
         """ Set the frequency dependent PSD variation info to apply during IFFT SNR calculation.
         """
         self.var_dict = var_dict
@@ -370,9 +370,6 @@ class MatchedFilterControl(object):
         norm = (4.0 * self.delta_f) / sqrt(template_norm)
         self.correlators[segnum].correlate()
         self.ifft.execute()
-        
-        self._apply_frequency_dependent_psd_variation(epoch)
-
         
         self._apply_frequency_dependent_psd_variation(epoch)
 
