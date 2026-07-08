@@ -240,6 +240,54 @@ class MatchedFilterControl(object):
         else:
             raise ValueError("Invalid downsample factor")
 
+    def set_psd_variation(self, var_dict, fbins, sample_rate, var_threshold=1.6):
+        """ Set the frequency dependent PSD variation info to apply during IFFT SNR calculation.
+        """
+        self.var_dict = var_dict
+        self.fbins = fbins
+        self.psd_var_sample_rate = sample_rate
+        self.var_threshold = var_threshold
+
+    def _apply_frequency_dependent_psd_variation(self, epoch):
+        if not hasattr(self, 'var_dict') or self.var_dict is None or epoch is None:
+            return
+
+        segment_start = float(epoch)
+        segment_end = segment_start + (len(self.snr_mem) * self.delta_t)
+        
+        # Find times within this segment that are noisy
+        noise_times = {
+            t: [(i, x) for i, x in enumerate(v) if x > self.var_threshold]
+            for t, v in self.var_dict.items()
+            if any(x > self.var_threshold for x in v) and segment_start <= float(t) <= segment_end
+        }
+        
+        if noise_times:
+            import numpy
+            from pycbc.types import TimeSeries
+            import pycbc.fft
+            
+            corr_v_mem = self.corr_mem.copy()
+            q = zeros(len(self.snr_mem), dtype=self.dtype)
+            patch_ifft = pycbc.fft.IFFT(corr_v_mem, q)
+            
+            for t in noise_times:
+                corr_v_mem[:] = self.corr_mem[:]
+                for (i, v_val) in noise_times[t]:
+                    f_start_idx = int(self.fbins[i] / self.delta_f)
+                    f_end_idx = int(self.fbins[i+1] / self.delta_f)
+                    f_end_idx = min(f_end_idx, len(corr_v_mem))
+                    if f_start_idx < len(corr_v_mem):
+                        corr_v_mem[f_start_idx:f_end_idx] /= numpy.sqrt(v_val)
+                
+                patch_ifft.execute()
+                
+                t_idx_start = max(int((float(t) - 0.5 - segment_start) / self.delta_t), 0)
+                t_idx_end = min(int((float(t) + 0.5 - segment_start) / self.delta_t), len(self.snr_mem))
+                
+                if t_idx_start < t_idx_end:
+                    self.snr_mem[t_idx_start:t_idx_end] = q[t_idx_start:t_idx_end]
+
     def full_matched_filter_and_cluster_symm(self, segnum, template_norm, window, epoch=None):
         """ Returns the complex snr timeseries, normalization of the complex snr,
         the correlation vector frequency series, the list of indices of the
@@ -274,6 +322,9 @@ class MatchedFilterControl(object):
         norm = (4.0 * self.delta_f) / sqrt(template_norm)
         self.correlators[segnum].correlate()
         self.ifft.execute()
+        
+        self._apply_frequency_dependent_psd_variation(epoch)
+
         snrv, idx = self.threshold_and_clusterers[segnum].threshold_and_cluster(self.snr_threshold / norm, window)
 
         if len(idx) == 0:
@@ -319,6 +370,12 @@ class MatchedFilterControl(object):
         norm = (4.0 * self.delta_f) / sqrt(template_norm)
         self.correlators[segnum].correlate()
         self.ifft.execute()
+        
+        self._apply_frequency_dependent_psd_variation(epoch)
+
+        
+        self._apply_frequency_dependent_psd_variation(epoch)
+
         idx, snrv = events.threshold(self.snr_mem[self.segments[segnum].analyze],
                                      self.snr_threshold / norm)
         idx, snrv = events.cluster_reduce(idx, snrv, window)

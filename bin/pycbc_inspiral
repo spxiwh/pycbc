@@ -274,9 +274,43 @@ def template_triggers(t_num):
               bank_chisq.values(template, stilde.psd, stilde, snrv, norm,
                                 idx+stilde.analyze.start)
 
-        out_vals['chisq'], out_vals['chisq_dof'] = \
-              power_chisq.values(corr, snrv, norm, stilde.psd,
-                                 idx+stilde.analyze.start, template)
+        # Apply frequency-dependent correction to corr for chisq if needed
+        if opt.psdvar_freq_dependent and fbins is not None:
+            chisq_combined = numpy.zeros(len(idx), dtype=float32)
+            chisq_dof_combined = numpy.zeros(len(idx), dtype=int)
+            
+            segment_start = float(stilde._epoch)
+            
+            for trig_i, trig_idx in enumerate(idx):
+                t_trig = segment_start + (trig_idx * stilde.delta_t)
+                
+                # Check if this trigger falls into a noisy window
+                corr_v = corr.copy()
+                for t, v in psd_var.items():
+                    if float(t) - 0.5 <= t_trig < float(t) + 0.5:
+                        for (bin_i, v_val) in [(i, x) for i, x in enumerate(v) if x > 1.6]:
+                            f_start_idx = int(fbins[bin_i] / stilde.delta_f)
+                            f_end_idx = int(fbins[bin_i+1] / stilde.delta_f)
+                            f_end_idx = min(f_end_idx, len(corr_v))
+                            if f_start_idx < len(corr_v):
+                                corr_v[f_start_idx:f_end_idx] /= numpy.sqrt(v_val)
+
+                # Compute chisq for just this point using patched corr_v
+                trig_snrv = numpy.array([snrv[trig_i]])
+                trig_idx_arr = numpy.array([trig_idx + stilde.analyze.start])
+                
+                c_val, c_dof = power_chisq.values(corr_v, trig_snrv, norm, stilde.psd,
+                                                  trig_idx_arr, template)
+                chisq_combined[trig_i] = c_val[0]
+                chisq_dof_combined[trig_i] = c_dof
+                
+            out_vals['chisq'] = chisq_combined
+            out_vals['chisq_dof'] = chisq_dof_combined[0] if len(chisq_dof_combined) else 0
+
+        else:
+            out_vals['chisq'], out_vals['chisq_dof'] = \
+                  power_chisq.values(corr, snrv, norm, stilde.psd,
+                                     idx+stilde.analyze.start, template)
 
         out_vals['sg_chisq'] = sg_chisq.values(stilde, template, stilde.psd,
                                       snrv, norm,
@@ -377,6 +411,7 @@ with ctx:
         if opt.psdvar_freq_dependent:
             logging.info("Frequency dependent PSD variation generated. Standard PSD variation output disabled.")
             opt.psdvar_segment = None
+            opt.psdvar_short_segment = None
 
 
     if opt.enable_q_transform:
@@ -432,6 +467,10 @@ with ctx:
                                    upsample_method=opt.upsample_method,
                                    gpu_callback_method=opt.gpu_callback_method,
                                    cluster_function=opt.cluster_function)
+
+    # Note: `psd_var` inside pycbc_inspiral is stored as `psd_var_dict` conceptually if opt.psdvar_freq_dependent
+    if opt.psdvar_freq_dependent and fbins is not None:
+        matched_filter.set_psd_variation(psd_var, fbins, gwstrain.sample_rate)
 
     bank_chisq = vetoes.SingleDetBankVeto(opt.bank_veto_bank_file,
                                           flen, delta_f, flow, complex64,
