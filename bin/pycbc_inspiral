@@ -276,27 +276,26 @@ def template_triggers(t_num):
                                 idx+stilde.analyze.start)
 
         # Apply frequency-dependent correction to corr for chisq if needed
-        print("OUTSIDE PSDVAR")
-        if opt.psdvar_freq_dependent:
-            print("FD PSDVAR GOING")
+        if psd_var is not None and psd_var.frequency_dependent:
+            print("FD PSDVAR ENGAGED")
             chisq_combined = numpy.zeros(len(idx), dtype=float32)
             chisq_dof_combined = numpy.zeros(len(idx), dtype=int64)
             
             segment_start = float(stilde._epoch)
             
-            # Using 1.6 as the var_threshold default hardcode until a CLI arg is added
-            var_threshold = VAR_THRESHOLD
-            
             for trig_i, trig_idx in enumerate(idx):
                 print("TRIGGER", trig_idx)
                 t_trig = segment_start + ((trig_idx+stilde.analyze.start) * stilde.delta_t)
                 print(t_trig, segment_start)
+                # FIXME: The code below gives the wrong time, but seems to
+                #        correspond to correct values. Probably wrong in
+                #        psdvar initialization as well?
                 t_trig = segment_start + (trig_idx) * stilde.delta_t
                 
                 corr_v = corr.copy()
                 for t, v in psd_var.items():
                     if float(t) - 0.5 <= t_trig < float(t) + 0.5:
-                        for (bin_i, v_val) in [(i, x) for i, x in enumerate(v) if x > var_threshold]:
+                        for (bin_i, v_val) in [(i, x) for i, x in enumerate(v) if x > psd_var.threshold]:
                             print("PSD VARRING", t, bin_i, v_val)
                             f_start_idx = int(psd_var.fbins[bin_i] / stilde.delta_f)
                             f_end_idx = int(psd_var.fbins[bin_i+1] / stilde.delta_f)
@@ -335,10 +334,9 @@ def template_triggers(t_num):
         out_vals['time_index'] = idx
         out_vals['snr'] = snrv * norm
         out_vals['sigmasq'] = numpy.zeros(len(snrv), dtype=float32) + sigmasq
-        if opt.psdvar_short_segment is not None:
+        if psd_var is not None and getattr(psd_var, 'store_in_events', False):
             out_vals['psd_var_val'] = \
-                        pycbc.psd.find_trigger_value(psd_var,
-                                      out_vals['time_index'],
+                        psd_var.find_trigger_values(out_vals['time_index'],
                                       opt.gps_start_time, opt.sample_rate)
         #print(idx, out_vals['time_index'])
 
@@ -401,26 +399,7 @@ with ctx:
         sys.exit(0)
 
     # FIXME: Maybe we should use the PSD corresponding to each trigger
-    if opt.psdvar_segment is not None:
-        logging.info("Calculating PSD variation")
-        
-        fbins = None
-        if opt.psdvar_freq_dependent and opt.psdvar_freq_bins:
-            fbins = [float(f) for f in opt.psdvar_freq_bins.split(',')]
-            
-        # If fbins is None here, calc_psd_variation will internally compute geometrically spaced bins
-        psd_var = pycbc.psd.variation.calc_psd_variation(gwstrain, opt.psdvar_segment,
-                opt.psdvar_short_segment, opt.psdvar_long_segment,
-                opt.psdvar_psd_duration, opt.psdvar_psd_stride,
-                opt.psd_estimation, opt.psdvar_low_freq, opt.psdvar_high_freq,
-                frequency_dependent=opt.psdvar_freq_dependent, fbins=fbins)
-
-        # Disable storing PSD variation numbers into events if we're using frequency-dependent
-        if opt.psdvar_freq_dependent:
-            logging.info("Frequency dependent PSD variation generated. Standard PSD variation output disabled.")
-            opt.psdvar_segment = None
-            opt.psdvar_short_segment = None
-
+    psd_var = pycbc.psd.variation.PSDVariation.from_cli(opt, gwstrain)
 
     if opt.enable_q_transform:
         logging.info("Performing q-transform on analysis segments")
@@ -477,9 +456,8 @@ with ctx:
                                    cluster_function=opt.cluster_function)
 
     # Note: `psd_var` inside pycbc_inspiral is stored as an object with `var_dict` and `fbins` if opt.psdvar_freq_dependent
-    VAR_THRESHOLD=1.1
-    if opt.psdvar_freq_dependent:
-        matched_filter.set_psd_variation(psd_var.var_dict, psd_var.fbins, gwstrain.sample_rate, var_threshold=VAR_THRESHOLD)
+    if psd_var is not None and psd_var.frequency_dependent:
+        matched_filter.set_psd_variation(psd_var.var_dict, psd_var.fbins, gwstrain.sample_rate, var_threshold=psd_var.threshold)
 
     bank_chisq = vetoes.SingleDetBankVeto(opt.bank_veto_bank_file,
                                           flen, delta_f, flow, complex64,

@@ -230,22 +230,7 @@ with ctx:
         sys.exit(0)
 
     # FIXME: Maybe we should use the PSD corresponding to each trigger
-    if opt.psdvar_segment is not None:
-        logging.info("Calculating PSD variation")
-
-        fbins = None
-        if opt.psdvar_freq_dependent and opt.psdvar_freq_bins:
-            fbins = [float(f) for f in opt.psdvar_freq_bins.split(',')]
-
-        psd_var = pycbc.psd.variation.calc_psd_variation(gwstrain, opt.psdvar_segment,
-                opt.psdvar_short_segment, opt.psdvar_long_segment,
-                opt.psdvar_psd_duration, opt.psdvar_psd_stride,
-                opt.psd_estimation, opt.psdvar_low_freq, opt.psdvar_high_freq,
-                frequency_dependent=opt.psdvar_freq_dependent, fbins=fbins)
-
-        if opt.psdvar_freq_dependent:
-            logging.info("Frequency dependent PSD variation generated. Standard PSD variation output disabled.")
-            opt.psdvar_segment = None
+    psd_var = pycbc.psd.variation.PSDVariation.from_cli(opt, gwstrain)
 
     if opt.sky_maximization_method == 'hom':
 
@@ -351,10 +336,9 @@ with ctx:
             out_vals['time_index'] = idx
             out_vals['snr'] = snrv
 
-            if opt.psdvar_short_segment is not None:
+            if getattr(psd_var, 'store_in_events', False):
                 out_vals['psd_var_val'] = \
-                            pycbc.psd.find_trigger_value(psd_var,
-                                          out_vals['time_index'],
+                            psd_var.find_trigger_values(out_vals['time_index'],
                                           opt.gps_start_time, opt.sample_rate)
 
             event_mgr.add_template_events(names, [out_vals[n] for n in names])

@@ -139,7 +139,7 @@ def from_cli(opt, length, delta_f, low_frequency_cutoff,
             fill_value = opt.invpsd_trunc_low_freq_fill_value
         except AttributeError:
             fill_value = 0.
-        psd = inverse_spectrum_truncation(psd, 
+        psd = inverse_spectrum_truncation(psd,
             int(opt.psd_inverse_length * sample_rate),
             which_spectrum=which_spectrum,
             low_frequency_cutoff=f_low,
@@ -284,6 +284,8 @@ def insert_psd_option_group(parser, output=True, include_data_options=True):
     psd_options.add_argument("--psdvar-freq-bins", type=str,
                              help="Comma separated list of frequency bin edges for "
                                   "frequency dependent PSD variation.")
+    psd_options.add_argument("--psdvar-threshold", type=float, default=1.6,
+                             help="Threshold for frequency dependent PSD variation.")
 
     if include_data_options :
         psd_options.add_argument("--psd-estimation",
@@ -428,6 +430,8 @@ def insert_psd_option_group_multi_ifo(parser):
     psd_options.add_argument("--psdvar-freq-bins", type=str,
                              help="Comma separated list of frequency bin edges for "
                                   "frequency dependent PSD variation.")
+    psd_options.add_argument("--psdvar-threshold", type=float, default=1.6,
+                             help="Threshold for frequency dependent PSD variation.")
 
     return psd_options
 

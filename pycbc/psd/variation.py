@@ -286,7 +286,7 @@ def get_psdvar_freq_dict(data, fbins, segment=8., short_segment=0.25,
     # put in format {time: [variations]}
     timestamps = var_dict_raw[fbins[0]].sample_times.numpy()
     var_array = numpy.array([v.numpy() for v in var_dict_raw.values()])  # shape: (F, T)
-    
+
     var_dict = {
         float(timestamps[i]): var_array[:, i]
         for i in range(len(timestamps))
@@ -294,39 +294,75 @@ def get_psdvar_freq_dict(data, fbins, segment=8., short_segment=0.25,
     return var_dict
 
 
-class FrequencyDependentPSDVariation(object):
-    def __init__(self, var_dict, fbins):
-        self.var_dict = var_dict
-        self.fbins = fbins
-        
-    def items(self):
-        return self.var_dict.items()
+class PSDVariation(object):
+    @classmethod
+    def from_cli(cls, opt, strain, glitch_remover=True, nbins=10):
+        is_enabled = hasattr(opt, 'psdvar_segment') and opt.psdvar_segment is not None
+        if not is_enabled:
+            return None
 
-def calc_psd_variation(strain, segment=8., short_segment=0.25, psd_long_segment=512.,
-                       psd_duration=8., psd_stride=4., psd_avg_method='median',
-                       low_freq=20., high_freq=480., glitch_remover=True,
-                       frequency_dependent=False, fbins=None, nbins=10):
-    """ High-level wrapper function to calculate PSD drift either wide-band or frequency dependent.
-    
-    If frequency_dependent is True, returns a FrequencyDependentPSDVariation object containing
-    var_dict and fbins. If fbins is None, defaults to `nbins` geometrically spaced bins between 
-    low_freq and high_freq.
-    Otherwise, returns a single TimeSeries.
-    """
-    if frequency_dependent:
-        if fbins is None:
-            # Default internal calculation
-            fbins = numpy.geomspace(low_freq, high_freq, nbins + 1)
-        
-        var_dict = get_psdvar_freq_dict(strain, fbins, segment=segment, short_segment=short_segment,
-                                    psd_long_segment=psd_long_segment, psd_duration=psd_duration, 
-                                    psd_stride=psd_stride, psd_avg_method=psd_avg_method,
-                                    glitch_remover=glitch_remover)
-        return FrequencyDependentPSDVariation(var_dict, fbins)
-    else:
-        return calc_filt_psd_variation(strain, segment, short_segment, psd_long_segment,
-                                       psd_duration, psd_stride, psd_avg_method, low_freq,
-                                       high_freq, glitch_remover=glitch_remover)
+        import logging
+        logging.info("Calculating PSD variation")
+
+        segment = opt.psdvar_segment
+        short_segment = opt.psdvar_short_segment
+        long_segment = opt.psdvar_long_segment
+        psd_duration = opt.psdvar_psd_duration
+        psd_stride = opt.psdvar_psd_stride
+        avg_method = getattr(opt, 'psd_estimation', 'median')
+        low_freq = opt.psdvar_low_freq
+        high_freq = opt.psdvar_high_freq
+
+        freq_dep = getattr(opt, 'psdvar_freq_dependent', False)
+        threshold = getattr(opt, 'psdvar_threshold', 1.6)
+
+        fbins = None
+        if freq_dep:
+            if hasattr(opt, 'psdvar_freq_bins') and opt.psdvar_freq_bins:
+                fbins = [float(f) for f in opt.psdvar_freq_bins.split(',')]
+            else:
+                fbins = numpy.geomspace(low_freq, high_freq, nbins + 1)
+
+        obj = cls(strain, freq_dep, fbins, threshold, segment,
+                   short_segment, long_segment, psd_duration,
+                   psd_stride, avg_method, low_freq, high_freq, glitch_remover)
+
+        # Disable storing PSD variation numbers into events if we're using frequency-dependent
+        if not obj.store_in_events:
+            import logging
+            if freq_dep:
+                logging.info("Frequency dependent PSD variation generated. Standard PSD variation output disabled.")
+            opt.psdvar_segment = None
+            opt.psdvar_short_segment = None
+
+        return obj
+
+    def __init__(self, strain, frequency_dependent, fbins, threshold, segment,
+                 short_segment, long_segment, psd_duration,
+                 psd_stride, avg_method, low_freq, high_freq, glitch_remover):
+        self.frequency_dependent = frequency_dependent
+        self.fbins = fbins
+        self.threshold = threshold
+        self.store_in_events = not frequency_dependent and short_segment is not None
+
+        if frequency_dependent:
+            self.var_dict = get_psdvar_freq_dict(
+                strain, self.fbins, segment=segment, short_segment=short_segment,
+                psd_long_segment=long_segment, psd_duration=psd_duration,
+                psd_stride=psd_stride, psd_avg_method=avg_method,
+                glitch_remover=glitch_remover)
+            self.data = None
+        else:
+            self.var_dict = None
+            self.data = calc_filt_psd_variation(
+                strain, segment, short_segment, long_segment,
+                psd_duration, psd_stride, avg_method, low_freq,
+                high_freq, glitch_remover=glitch_remover)
+
+    def items(self):
+        if self.frequency_dependent:
+            return self.var_dict.items()
+        return None
 
 
 def find_trigger_value(psd_var, idx, start, sample_rate):
