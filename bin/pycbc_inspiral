@@ -289,7 +289,9 @@ def template_triggers(t_num):
             
             for trig_i, trig_idx in enumerate(idx):
                 print("TRIGGER", trig_idx)
-                t_trig = segment_start + (trig_idx * stilde.delta_t)
+                t_trig = segment_start + ((trig_idx+stilde.analyze.start) * stilde.delta_t)
+                print(t_trig, segment_start)
+                t_trig = segment_start + (trig_idx) * stilde.delta_t
                 
                 corr_v = corr.copy()
                 for t, v in psd_var.items():

@@ -17,6 +17,11 @@ end_times = f[detector]['end_time'][:]
 snrs = f[detector]['snr'][:]
 chi2rs = f[detector]['chisq'][:] / (2 * f[detector]['chisq_dof'][:] - 2)
 
+msk = abs(end_times - gw150914_time) < 0.1
+
+print(snrs[msk])
+print(chi2rs[msk])
+
 # search for trigs compatible with GW150914
 mask = np.logical_and.reduce([abs(end_times - gw150914_time) < 0.1,
                               snrs > 0.8 * gw150914_snr[detector],
