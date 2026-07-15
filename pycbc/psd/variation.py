@@ -12,7 +12,7 @@ from pycbc.filter import make_frequency_series
 from pycbc.vetoes import power_chisq_bins
 
 
-def create_full_filt(freqs, filt, plong, srate, psd_duration):
+def create_full_filt(freqs, filt, plong, srate, psd_duration, low_freq, high_freq):
     """Create a filter to convolve with strain data to find PSD variation.
 
     Parameters
@@ -39,7 +39,14 @@ def create_full_filt(freqs, filt, plong, srate, psd_duration):
     # will be one if this filter is applied to white noise which
     # already has a variance of one.
     fweight = freqs ** (-7./6.) * filt / numpy.sqrt(plong)
-    fweight[0] = 0.
+    fweight[0] = 0
+    # Need to impose frequency limits here to avoid issues if the PSD goes to
+    # 0 (e.g. at very low frequencies), which can then dominate the final
+    # filter produced.
+    # Allow some buffer here to avoid abrupt terminations
+    # FIXME: This is a bit hacky, better HP filters would avoid this
+    fweight[freqs < low_freq*0.9] = 0
+    fweight[freqs > high_freq*1.1] = 0
     norm = (sum(abs(fweight) ** 2) / (len(fweight) - 1.)) ** -0.5
     fweight = norm * fweight
     fwhiten = numpy.sqrt(2. / srate) / numpy.sqrt(plong)
@@ -196,7 +203,7 @@ def calc_filt_psd_variation(strain, segment, short_segment, psd_long_segment,
         freqs = numpy.array(plong.sample_frequencies, dtype=fs_dtype)
         plong = plong.numpy()
 
-        full_filt = create_full_filt(freqs, filt, plong, srate, psd_duration)
+        full_filt = create_full_filt(freqs, filt, plong, srate, psd_duration, low_freq, high_freq)
         # Convolve the filter with long segment of data
         wstrain = sig.fftconvolve(astrain, full_filt, mode='same')
         wstrain = wstrain[int(strain_crop * srate):-int(strain_crop * srate)]

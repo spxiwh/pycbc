@@ -287,10 +287,6 @@ def template_triggers(t_num):
                 print("TRIGGER", trig_idx)
                 t_trig = segment_start + ((trig_idx+stilde.analyze.start) * stilde.delta_t)
                 print(t_trig, segment_start)
-                # FIXME: The code below gives the wrong time, but seems to
-                #        correspond to correct values. Probably wrong in
-                #        psdvar initialization as well?
-                t_trig = segment_start + (trig_idx) * stilde.delta_t
                 
                 corr_v = corr.copy()
                 for t, v in psd_var.items():
