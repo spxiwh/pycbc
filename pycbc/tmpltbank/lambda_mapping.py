@@ -15,6 +15,7 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 import re
 import logging
+import functools
 import numpy
 
 
@@ -125,6 +126,32 @@ def generate_inverse_mapping(order):
 
 generate_inverse_mapping.__doc__ = \
     generate_inverse_mapping.__doc__.format(pycbcValidOrdersHelpDescriptions)
+
+@functools.lru_cache(maxsize=None)
+def parse_lambda_mapping(order):
+    """
+    Parse the Lambda-term names for a PN order into (is_log_term, pn_order)
+    tuples, in metric-index order. The result depends only on the order
+    string so it is computed once and cached; this parsing used to happen
+    with regexes on every call to get_chirp_params, which dominated its
+    runtime when called with small arrays in a loop.
+    """
+    mapping = generate_inverse_mapping(order)
+    parsed = []
+    for idx in range(len(mapping)):
+        rematch = re.match('^Lambda([0-9]+)', mapping[idx])
+        if rematch:
+            parsed.append((False, int(rematch.groups()[0])))
+            continue
+        rematch = re.match('^LogLambda([0-9]+)', mapping[idx])
+        if rematch:
+            parsed.append((True, int(rematch.groups()[0])))
+            continue
+        if re.match('^LogLogLambda([0-9]+)', mapping[idx]):
+            raise ValueError("LOGLOG terms are not implemented")
+        err_msg = "Failed to parse " + mapping[idx]
+        raise ValueError(err_msg)
+    return tuple(parsed)
 
 def get_ethinca_orders():
     """
@@ -248,51 +275,27 @@ def get_chirp_params(mass1, mass2, spin1z, spin2z, f0, order,
          dquadparam1_v, dquadparam2_v)
 
     vec_len = lalsimulation.PN_PHASING_SERIES_MAX_ORDER + 1;
-    phasing_vs = numpy.zeros([num_points, vec_len])
-    phasing_vlogvs = numpy.zeros([num_points, vec_len])
-    phasing_vlogvsqs = numpy.zeros([num_points, vec_len])
 
     lng = len(mass1)
-    jmp = lng * vec_len
-    for idx in range(vec_len):
-        phasing_vs[:,idx] = phasing_arr.data[lng*idx : lng*(idx+1)]
-        phasing_vlogvs[:,idx] = \
-            phasing_arr.data[jmp + lng*idx : jmp + lng*(idx+1)]
-        phasing_vlogvsqs[:,idx] = \
-            phasing_arr.data[2*jmp + lng*idx : 2*jmp + lng*(idx+1)]
+    # The lal phasing array is a flat [series, pn_order, point] block; view
+    # it in that shape rather than copying term-by-term. These views are only
+    # read below, while phasing_arr is still alive, so this is safe.
+    phasing_all = phasing_arr.data.reshape(3, vec_len, lng)
+    phasing_vs = phasing_all[0]
+    phasing_vlogvs = phasing_all[1]
 
     pim = PI * (mass1 + mass2)*MTSUN_SI
     pmf = pim * f0
     pmf13 = pmf**(1./3.)
     logpim13 = numpy.log((pim)**(1./3.))
 
-    mapping = generate_inverse_mapping(order)
     lambdas = []
-    lambda_str = '^Lambda([0-9]+)'
-    loglambda_str = '^LogLambda([0-9]+)'
-    logloglambda_str = '^LogLogLambda([0-9]+)'
-    for idx in range(len(mapping.keys())):
-        # RE magic engage!
-        rematch = re.match(lambda_str, mapping[idx])
-        if rematch:
-            pn_order = int(rematch.groups()[0])
-            term = phasing_vs[:,pn_order]
-            term = term + logpim13 * phasing_vlogvs[:,pn_order]
+    for is_log_term, pn_order in parse_lambda_mapping(order):
+        if is_log_term:
+            lambdas.append(phasing_vlogvs[pn_order] * pmf13**(-5+pn_order))
+        else:
+            term = phasing_vs[pn_order] + logpim13 * phasing_vlogvs[pn_order]
             lambdas.append(term * pmf13**(-5+pn_order))
-            continue
-        rematch = re.match(loglambda_str, mapping[idx])
-        if rematch:
-            pn_order = int(rematch.groups()[0])
-            lambdas.append((phasing_vlogvs[:,pn_order]) * pmf13**(-5+pn_order))
-            continue
-        rematch = re.match(logloglambda_str, mapping[idx])
-        if rematch:
-            raise ValueError("LOGLOG terms are not implemented")
-            #pn_order = int(rematch.groups()[0])
-            #lambdas.append(phasing_vlogvsqs[:,pn_order] * pmf13**(-5+pn_order))
-            #continue
-        err_msg = "Failed to parse " +  mapping[idx]
-        raise ValueError(err_msg)
 
     if sngl_inp:
         return [l[0] for l in lambdas]

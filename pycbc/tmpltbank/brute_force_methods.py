@@ -1,3 +1,21 @@
+"""Numerical routines for the aligned-spin geometric bank placement used by
+pycbc_geom_aligned_2dstack. They map a point in the xi coordinate system back
+to physical masses and spins, and measure the extent ("depth") of the higher
+xi directions at a placed point so that templates can be stacked there.
+
+Two families are provided:
+
+* The deterministic default: a damped Gauss-Newton inversion
+  (:func:`get_physical_covaried_masses_newton`) and a predictor-corrector
+  continuation depth search (:func:`stack_xi_direction_continuation`). These
+  exploit the near-affine structure of the xi coordinates, so they are fast
+  and reproducible.
+* The older stochastic routines (:func:`get_physical_covaried_masses` and
+  :func:`stack_xi_direction_brute`), which throw random points at the space.
+  They are much slower and non-deterministic, and are kept for reference and
+  reachable via ``pycbc_geom_aligned_2dstack --use-legacy-method``.
+"""
+
 import logging
 import numpy
 
@@ -514,4 +532,439 @@ def find_xi_extrema_brute(xis, bestMasses, bestXis, direction_num, req_match, \
                 bestMasses[3] = spin2z[idx]
                 bestChirpmass = bestMasses[0] * (bestMasses[1])**(3./5.)
     return xiextrema
+
+
+
+# ---------------------------------------------------------------------------
+# Deterministic derivative-based method (the default; see the module
+# docstring). The public entry points are get_physical_covaried_masses_newton
+# (inversion) and stack_xi_direction_continuation (depth). Everything else in
+# this section is an internal helper.
+# ---------------------------------------------------------------------------
+
+# Central finite-difference steps for (m1, m2, s1z, s2z)
+_FD_H = numpy.array([1e-5, 1e-5, 1e-6, 1e-6])
+
+
+def _eval_pts(pts, metricParams, fUpper):
+    """Evaluate the xi coordinates of pts (N, 4) -> array (n_xi, N)."""
+    xis = get_cov_params(
+        pts[:, 0], pts[:, 1], pts[:, 2], pts[:, 3], metricParams, fUpper)
+    return numpy.array(xis)
+
+
+def _jac_and_center(x, metricParams, fUpper):
+    """xi values and Jacobian at x via batched central differences.
+
+    Returns (fx (n_xi,), J (n_xi, 4)) using a single vectorized map
+    evaluation of 9 points.
+    """
+    pts = numpy.tile(x, (9, 1))
+    for i in range(4):
+        pts[1 + 2 * i, i] += _FD_H[i]
+        pts[2 + 2 * i, i] -= _FD_H[i]
+    xis = _eval_pts(pts, metricParams, fUpper)
+    fx = xis[:, 0]
+    J = numpy.empty((xis.shape[0], 4))
+    for i in range(4):
+        J[:, i] = (xis[:, 1 + 2 * i] - xis[:, 2 + 2 * i]) / (2 * _FD_H[i])
+    return fx, J
+
+
+def _spin_caps_scalar(m1, m2, mrp):
+    """Per-component maximum |spin| for a single (m1, m2), applying the NS/BH
+    boundary rule: below ns_bh_boundary_mass a component is capped at the NS
+    spin, above it at the BH spin. Kept scalar (no array allocation) because
+    it is on the hot path - hundreds of thousands of calls per bank.
+    """
+    maxS = mrp.maxNSSpinMag if mrp.maxNSSpinMag > mrp.maxBHSpinMag \
+        else mrp.maxBHSpinMag
+    minS = mrp.maxNSSpinMag if mrp.maxNSSpinMag < mrp.maxBHSpinMag \
+        else mrp.maxBHSpinMag
+    if mrp.nsbhFlag:
+        return mrp.maxBHSpinMag, mrp.maxNSSpinMag
+    if maxS == minS:
+        return maxS, maxS
+    b = mrp.ns_bh_boundary_mass
+    cap1 = mrp.maxBHSpinMag if m1 >= b else mrp.maxNSSpinMag
+    cap2 = mrp.maxBHSpinMag if m2 >= b else mrp.maxNSSpinMag
+    return cap1, cap2
+
+
+def _project(x, mrp):
+    """Project a point onto the box/spin-cap constraints (m1 >= m2)."""
+    m1, m2, s1, s2 = x
+    if m1 < m2:
+        m1, m2, s1, s2 = m2, m1, s2, s1
+    m1 = min(max(m1, mrp.minMass1), mrp.maxMass1)
+    m2 = min(max(m2, mrp.minMass2), mrp.maxMass2)
+    if m2 > m1:
+        m2 = m1
+    cap1, cap2 = _spin_caps_scalar(m1, m2, mrp)
+    s1 = min(max(s1, -cap1), cap1)
+    s2 = min(max(s2, -cap2), cap2)
+    return numpy.array([m1, m2, s1, s2])
+
+
+def _is_valid(x, mrp):
+    """Full physical validity check for a single point."""
+    m1, m2, s1, s2 = x
+    tol = 1e-6
+    if m1 < m2 - tol:
+        return False
+    if m1 < mrp.minMass1 - tol or m1 > mrp.maxMass1 + tol:
+        return False
+    if m2 < mrp.minMass2 - tol or m2 > mrp.maxMass2 + tol:
+        return False
+    M = m1 + m2
+    if M > mrp.maxTotMass + tol or M < mrp.minTotMass - tol:
+        return False
+    eta = m1 * m2 / (M * M)
+    if eta > mrp.maxEta + 1e-9:
+        return False
+    min_eta = getattr(mrp, 'minEta', None)
+    if min_eta and eta < min_eta - 1e-9:
+        return False
+    if mrp.max_chirp_mass or mrp.min_chirp_mass:
+        mc = M * eta**0.6
+        if mrp.max_chirp_mass and mc > mrp.max_chirp_mass * (1 + 1e-9):
+            return False
+        if mrp.min_chirp_mass and mc < mrp.min_chirp_mass * (1 - 1e-9):
+            return False
+    cap1, cap2 = _spin_caps_scalar(m1, m2, mrp)
+    if abs(s1) > cap1 + 1e-9 or abs(s2) > cap2 + 1e-9:
+        return False
+    return True
+
+
+def _seed_from_bestmasses(bestMasses, mrp):
+    """Convert a [totmass, eta, s1z, s2z] seed to a projected (m1,m2,s1,s2)."""
+    tot = float(bestMasses[0])
+    eta = min(float(bestMasses[1]), 0.25)
+    diff = numpy.sqrt(max(tot * tot * (1 - 4 * eta), 0.))
+    m1 = (tot + diff) / 2.
+    m2 = (tot - diff) / 2.
+    return _project(
+        numpy.array([m1, m2, float(bestMasses[2]), float(bestMasses[3])]), mrp)
+
+
+def _gn_solve(target, x0, req_match, mrp, metricParams, fUpper, max_iter=25):
+    """Damped Gauss-Newton solve of xi[:k](x) = target.
+
+    Returns (x, fx, dist2, nfev, converged). Underdetermined steps use the
+    min-norm least-squares solution; step lengths are chosen by evaluating a
+    geometric ladder of candidates in one batched map call.
+    """
+    k = len(target)
+    target = numpy.asarray(target, dtype=float)
+    x = _project(numpy.asarray(x0, dtype=float), mrp)
+    fx, J = _jac_and_center(x, metricParams, fUpper)
+    nfev = 9
+    r = fx[:k] - target
+    d2 = float(r @ r)
+    alphas = 2.0 ** -numpy.arange(7)
+    for _ in range(max_iter):
+        if d2 < req_match:
+            return x, fx, d2, nfev, True
+        dx = numpy.linalg.lstsq(J[:k], -r, rcond=None)[0]
+        trials = numpy.array([_project(x + a * dx, mrp) for a in alphas])
+        keep = numpy.array([_is_valid(t, mrp) for t in trials])
+        if not keep.any():
+            break
+        tpts = trials[keep]
+        txis = _eval_pts(tpts, metricParams, fUpper)
+        nfev += len(tpts)
+        tr = txis[:k] - target[:, None]
+        td2 = numpy.einsum('ij,ij->j', tr, tr)
+        j = int(td2.argmin())
+        if td2[j] >= d2:
+            break
+        x = tpts[j]
+        fx = txis[:, j]
+        d2 = float(td2[j])
+        if d2 < req_match:
+            return x, fx, d2, nfev, True
+        fx, J = _jac_and_center(x, metricParams, fUpper)
+        nfev += 9
+        r = fx[:k] - target
+        d2 = float(r @ r)
+    return x, fx, d2, nfev, d2 < req_match
+
+
+def _alt_seeds(x0, mrp):
+    """Deterministic alternative starting points for Gauss-Newton restarts."""
+    seeds = []
+    seeds.append(_project(numpy.array([x0[0], x0[1], 0., 0.]), mrp))
+    for fac in (0.9, 1.1):
+        seeds.append(_project(
+            numpy.array([x0[0] * fac, x0[1] * fac, x0[2], x0[3]]), mrp))
+    mmid1 = 0.5 * (mrp.minMass1 + mrp.maxMass1)
+    mmid2 = 0.5 * (mrp.minMass2 + mrp.maxMass2)
+    seeds.append(_project(numpy.array([mmid1, mmid2, x0[2], x0[3]]), mrp))
+    return seeds
+
+
+def get_physical_covaried_masses_newton(xis, bestMasses, bestXis, req_match,
+                                        massRangeParams, metricParams, fUpper,
+                                        giveUpThresh=500):
+    """Deterministic Gauss-Newton inversion from the xi coordinate system to
+    physical masses and spins.
+
+    A drop-in replacement for :func:`get_physical_covaried_masses` with the
+    same call and return signature. Rather than the stochastic jump search it
+    solves ``xi(m1, m2, s1z, s2z) = xis`` by damped Gauss-Newton on a batched
+    central-difference Jacobian, starting from ``bestMasses``. If that stalls
+    it retries from a few deterministic alternative seeds, and only as a last
+    resort falls back to :func:`get_physical_covaried_masses` (seeded from the
+    target so the result is reproducible). The whole routine is deterministic.
+
+    Parameters
+    -----------
+    xis : list or array
+        The target position in the xi coordinate system. Only the first
+        ``len(xis)`` dimensions are matched.
+    bestMasses : list
+        [totalMass, eta, spin1z, spin2z] of a physical point close to xis,
+        used as the starting point.
+    bestXis : list
+        The xi coordinates of bestMasses. Accepted for signature
+        compatibility with the legacy method and passed to the fallback; not
+        otherwise required here.
+    req_match : float
+        Convergence tolerance: iteration stops once the squared xi distance to
+        the target is below this value.
+    massRangeParams : massRangeParameters instance
+        Mass and spin range limits defining the physical region.
+    metricParams : metricParameters instance
+        Structure holding the metric eigenvalues, eigenvectors and covariance
+        matrix needed to move between physical and xi coordinates.
+    fUpper : float
+        The upper frequency cutoff used when obtaining the xi coordinates.
+        Must be a key in metricParams.evals, metricParams.evecs and
+        metricParams.evecsCV.
+    giveUpThresh : int, optional
+        Iteration budget handed to the legacy fallback search.
+
+    Returns
+    --------
+    mass1 : float
+        Recovered mass of the heavier body.
+    mass2 : float
+        Recovered mass of the lighter body.
+    spin1z : float
+        Recovered spin of the heavier body.
+    spin2z : float
+        Recovered spin of the lighter body.
+    count : int
+        Number of map evaluations used.
+    mismatch : float
+        Squared xi distance between the recovered point and xis.
+    new_xis : list
+        The xi coordinates of the recovered point.
+    """
+    x0 = _seed_from_bestmasses(bestMasses, massRangeParams)
+    x, fx, d2, nfev, ok = _gn_solve(xis, x0, req_match, massRangeParams,
+                                    metricParams, fUpper)
+    if not ok:
+        for xalt in _alt_seeds(x0, massRangeParams):
+            x2, fx2, d22, n2, ok = _gn_solve(xis, xalt, req_match,
+                                             massRangeParams, metricParams,
+                                             fUpper)
+            nfev += n2
+            if d22 < d2:
+                x, fx, d2 = x2, fx2, d22
+            if ok:
+                break
+    if ok:
+        return x[0], x[1], x[2], x[3], nfev, d2, fx
+    logger.info("Gauss-Newton stalled (dist^2=%.3e); falling back to the "
+            "legacy brute-force search", d2)
+    # Seed numpy's global RNG from the target coordinates (and restore it
+    # afterwards) so the fallback - and therefore the whole newton method -
+    # is deterministic. Note hashes of number tuples do not depend on
+    # PYTHONHASHSEED, so this is stable across processes.
+    seed = abs(hash(tuple(numpy.round(numpy.asarray(xis, dtype=float), 10)))) \
+        % (2**32)
+    state = numpy.random.get_state()
+    numpy.random.seed(seed)
+    try:
+        result = get_physical_covaried_masses(
+            xis, bestMasses, bestXis, req_match, massRangeParams,
+            metricParams, fUpper, giveUpThresh=giveUpThresh)
+    finally:
+        numpy.random.set_state(state)
+    if result[5] < d2:
+        return result
+    return x[0], x[1], x[2], x[3], nfev, d2, fx
+
+
+def _correct_fixedJ(target, x, Bpinv, req_match, mrp, metricParams, fUpper,
+                    max_it=6):
+    """Corrector: pull x back into the req_match ball using a *fixed*
+    Jacobian pseudo-inverse Bpinv (from the predictor point). Costs one map
+    evaluation per iteration instead of re-differentiating, which is valid
+    because the predictor step is small so the Jacobian barely changes.
+
+    Returns (x, fx, d2, nfev, in_ball).
+    """
+    k = len(target)
+    nfev = 0
+    fx = _eval_pts(x[None, :], metricParams, fUpper)[:, 0]
+    nfev += 1
+    r = fx[:k] - target
+    d2 = float(r @ r)
+    for _ in range(max_it):
+        if d2 < req_match:
+            return x, fx, d2, nfev, True
+        dx = -(Bpinv @ r)
+        # Damped: try the full step first (the common case), backing off only
+        # if the fixed Jacobian overshoots near a boundary.
+        for alpha in (1.0, 0.5, 0.25):
+            xt = _project(x + alpha * dx, mrp)
+            ft = _eval_pts(xt[None, :], metricParams, fUpper)[:, 0]
+            nfev += 1
+            rt = ft[:k] - target
+            dt2 = float(rt @ rt)
+            if dt2 < d2:
+                x, fx, r, d2 = xt, ft, rt, dt2
+                break
+        else:
+            break
+    return x, fx, d2, nfev, d2 < req_match
+
+
+def _continuation_extremum(target, x0, fx0, dnum, sign, req_match, mrp,
+                           metricParams, fUpper, max_steps=80):
+    """Predictor-corrector walk of xi[dnum] to its extremum on the sheet
+    {xi[:k] == target}, staying inside the req_match ball via the corrector.
+
+    Predictor: step along the steepest-ascent direction of xi[dnum] projected
+    into the null space of the constraint Jacobian (so xi[:k] is unchanged to
+    first order). Corrector: a few fixed-Jacobian Newton steps back into the
+    req_match ball, reusing the pseudo-inverse computed for the predictor.
+    The step is grown on progress and backtracked otherwise; the walk
+    terminates when no feasible ascent step improves xi[dnum] (typically at a
+    physical boundary).
+
+    Returns (best_val, best_x, nfev).
+    """
+    k = len(target)
+    x = x0.copy()
+    best_val = float(fx0[dnum])
+    best_x = x.copy()
+    step = 0.3
+    min_step = 1e-4
+    nfev = 0
+    eye = numpy.eye(4)
+
+    def _direction(x):
+        # Jacobian, ascent direction in the sheet tangent, and the pseudo-
+        # inverse the corrector reuses. Returns None if there is no ascent.
+        fx, J = _jac_and_center(x, metricParams, fUpper)
+        B = J[:k]
+        Bpinv = numpy.linalg.pinv(B)
+        d = sign * ((eye - Bpinv @ B) @ J[dnum])
+        nd = numpy.linalg.norm(d)
+        if nd < 1e-10:
+            return None
+        return d / nd, Bpinv
+
+    got = _direction(x)
+    nfev += 9
+    if got is None:
+        return best_val, best_x, nfev
+    d, Bpinv = got
+    for _ in range(max_steps):
+        improved = False
+        for frac in (1.0, 0.35, 0.12):
+            x_pred = _project(x + step * frac * d, mrp)
+            x_new, fx_new, d2, nf, ok = _correct_fixedJ(
+                target, x_pred, Bpinv, req_match, mrp, metricParams, fUpper)
+            nfev += nf
+            if ok and sign * (fx_new[dnum] - best_val) > 1e-6:
+                x = x_new
+                best_val = float(fx_new[dnum])
+                best_x = x_new
+                step = min(step * frac * 1.5, 4.0)
+                improved = True
+                break
+        if improved:
+            # x moved: refresh the ascent direction and Jacobian at the new x
+            got = _direction(x)
+            nfev += 9
+            if got is None:
+                break
+            d, Bpinv = got
+        else:
+            # x unchanged: only backtrack the step; keep d and Bpinv
+            step *= 0.3
+            if step < min_step:
+                break
+    return best_val, best_x, nfev
+
+
+def stack_xi_direction_continuation(xis, bestMasses, bestXis, direction_num,
+                                    req_match, massRangeParams, metricParams,
+                                    fUpper, **kwargs):
+    """Deterministic depth measurement in a specified xi direction.
+
+    A drop-in replacement for :func:`stack_xi_direction_brute`. It finds the
+    smallest and largest value of ``xi[direction_num]`` over the physically
+    valid points whose lower xi coordinates lie within the req_match ball of
+    the target, by walking the feasible surface with a predictor-corrector
+    continuation (see :func:`_continuation_extremum`) rather than throwing
+    random points at it. The result is deterministic.
+
+    Parameters
+    -----------
+    xis : list or array
+        Position in the xi space at which to assess the depth. May give only
+        the lower dimensions that are held fixed while direction_num is varied.
+    bestMasses : list
+        [totalMass, eta, spin1z, spin2z] of a physical point close to xis,
+        used as the starting point.
+    bestXis : list
+        The xi coordinates of bestMasses. Accepted for signature
+        compatibility with the legacy method; not otherwise required here.
+    direction_num : int
+        The xi dimension whose extent (depth) is measured (0 = xi_1, ...).
+    req_match : float
+        Only points within this squared xi distance of xis are considered.
+    massRangeParams : massRangeParameters instance
+        Mass and spin range limits defining the physical region.
+    metricParams : metricParameters instance
+        Structure holding the metric eigenvalues, eigenvectors and covariance
+        matrix needed to move between physical and xi coordinates.
+    fUpper : float
+        The upper frequency cutoff used when obtaining the xi coordinates.
+        Must be a key in metricParams.evals, metricParams.evecs and
+        metricParams.evecsCV.
+
+    Returns
+    --------
+    xi_min : float
+        The minimal value of xi[direction_num] over the valid region, or the
+        sentinel 1e10 if no feasible starting point can be found.
+    xi_max : float
+        The maximal value of xi[direction_num] over the valid region, or the
+        sentinel -1e10 if no feasible starting point can be found.
+    """
+    target = numpy.asarray(xis, dtype=float)
+    k = len(target)
+    x0 = _seed_from_bestmasses(bestMasses, massRangeParams)
+    fx0 = _eval_pts(x0[None, :], metricParams, fUpper)[:, 0]
+    r = fx0[:k] - target
+    if float(r @ r) > req_match or not _is_valid(x0, massRangeParams):
+        # Seed is not in the ball; solve for a feasible starting point
+        x0, fx0, d2, _, ok = _gn_solve(target, x0, req_match, massRangeParams,
+                                       metricParams, fUpper)
+        if not ok:
+            return 1e10, -1e10
+    ximin, _, _ = _continuation_extremum(target, x0, fx0, direction_num, -1.,
+                                         req_match, massRangeParams,
+                                         metricParams, fUpper)
+    ximax, _, _ = _continuation_extremum(target, x0, fx0, direction_num, +1.,
+                                         req_match, massRangeParams,
+                                         metricParams, fUpper)
+    return ximin, ximax
 
