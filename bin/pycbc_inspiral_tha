@@ -28,7 +28,7 @@ from multiprocessing import Pool
 import pycbc.version
 import pycbc.opt
 import pycbc.inject
-import pycbc.tha_marginalize as tha_marginalize
+import pycbc.filter.tha_marginalize as tha_marginalize
 import time
 
 last_progress_update = -1.0
