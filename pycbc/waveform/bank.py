@@ -1454,9 +1454,17 @@ class _PhenomTemplate():
         return h1, h2, h3, h4, h5
 
     def wn_cython(self, hs, ASD, flen, df, kmin, kmax):
+        from pycbc.types.array_cpu import whiten_and_normalize_five
+        from pycbc.types.array_cpu import whiten_and_normalize_four
         from pycbc.types.array_cpu import whiten_and_normalize_three
         from pycbc.types.array_cpu import whiten_and_normalize_two
         from pycbc.types.array_cpu import whiten_and_normalize_one
+        if len(hs) == 5:
+            whiten_and_normalize_five(hs[0].data, hs[1].data, hs[2].data, hs[3].data, hs[4].data,
+                                       ASD.data, flen, df, kmin, kmax)
+        if len(hs) == 4:
+            whiten_and_normalize_four(hs[0].data, hs[1].data, hs[2].data, hs[3].data,
+                                       ASD.data, flen, df, kmin, kmax)
         if len(hs) == 3:
             whiten_and_normalize_three(hs[0].data, hs[1].data, hs[2].data,
                                        ASD.data, flen, df, kmin, kmax)
@@ -1468,7 +1476,7 @@ class _PhenomTemplate():
 
 
     def whiten_and_normalize(self, hs, ASD, flen, df, kmin, kmax):
-        if len(hs) in [3,2,1]:
+        if len(hs) in [5,4,3,2,1]:
             self.wn_cython(hs, ASD, flen, df, kmin, kmax)
             return
         raise NotImplementedError()

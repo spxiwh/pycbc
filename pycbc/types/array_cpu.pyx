@@ -257,6 +257,128 @@ def whiten_and_normalize_three(
         h3[ii] = h3[ii] / sigmasq3
 
 
+@cython.wraparound(False)
+@cython.boundscheck(False)
+@cython.cdivision(True)
+def whiten_and_normalize_four(
+        double complex [:] h1,
+        double complex [:] h2,
+        double complex [:] h3,
+        double complex [:] h4,
+        float [:] ASD,
+        int flen,
+        float df,
+        int kmin,
+        int kmax
+):
+    cdef unsigned int ii
+    cdef double sigmasq1, sigmasq2, sigmasq3, sigmasq4
+
+    for ii in range(kmin, flen):
+        h1[ii] = h1[ii] / ASD[ii]
+        h2[ii] = h2[ii] / ASD[ii]
+        h3[ii] = h3[ii] / ASD[ii]
+        h4[ii] = h4[ii] / ASD[ii]
+
+    for ii in range(kmin):
+        h1[ii] = 0
+        h2[ii] = 0
+        h3[ii] = 0
+        h4[ii] = 0
+
+    for ii in range(kmax, flen):
+        h1[ii] = 0
+        h2[ii] = 0
+        h3[ii] = 0
+        h4[ii] = 0
+
+    sigmasq1 = 0
+    sigmasq2 = 0
+    sigmasq3 = 0
+    sigmasq4 = 0
+
+    for ii in range(flen):
+        sigmasq1 += (h1[ii].conjugate() * h1[ii]).real * 4. * df
+        sigmasq2 += (h2[ii].conjugate() * h2[ii]).real * 4. * df
+        sigmasq3 += (h3[ii].conjugate() * h3[ii]).real * 4. * df
+        sigmasq4 += (h4[ii].conjugate() * h4[ii]).real * 4. * df
+
+    sigmasq1 = sigmasq1**0.5
+    sigmasq2 = sigmasq2**0.5
+    sigmasq3 = sigmasq3**0.5
+    sigmasq4 = sigmasq4**0.5
+
+    for ii in range(flen):
+        h1[ii] = h1[ii] / sigmasq1
+        h2[ii] = h2[ii] / sigmasq2
+        h3[ii] = h3[ii] / sigmasq3
+        h4[ii] = h4[ii] / sigmasq4
+
+@cython.wraparound(False)
+@cython.boundscheck(False)
+@cython.cdivision(True)
+def whiten_and_normalize_five(
+        double complex [:] h1,
+        double complex [:] h2,
+        double complex [:] h3,
+        double complex [:] h4,
+        double complex [:] h5,
+        float [:] ASD,
+        int flen,
+        float df,
+        int kmin,
+        int kmax
+):
+    cdef unsigned int ii
+    cdef double sigmasq1, sigmasq2, sigmasq3, sigmasq4, sigmasq5
+
+    for ii in range(kmin, flen):
+        h1[ii] = h1[ii] / ASD[ii]
+        h2[ii] = h2[ii] / ASD[ii]
+        h3[ii] = h3[ii] / ASD[ii]
+        h4[ii] = h4[ii] / ASD[ii]
+        h5[ii] = h5[ii] / ASD[ii]
+
+    for ii in range(kmin):
+        h1[ii] = 0
+        h2[ii] = 0
+        h3[ii] = 0
+        h4[ii] = 0
+        h5[ii] = 0
+
+    for ii in range(kmax, flen):
+        h1[ii] = 0
+        h2[ii] = 0
+        h3[ii] = 0
+        h4[ii] = 0
+        h5[ii] = 0
+
+    sigmasq1 = 0
+    sigmasq2 = 0
+    sigmasq3 = 0
+    sigmasq4 = 0
+    sigmasq5 = 0
+
+    for ii in range(flen):
+        sigmasq1 += (h1[ii].conjugate() * h1[ii]).real * 4. * df
+        sigmasq2 += (h2[ii].conjugate() * h2[ii]).real * 4. * df
+        sigmasq3 += (h3[ii].conjugate() * h3[ii]).real * 4. * df
+        sigmasq4 += (h4[ii].conjugate() * h4[ii]).real * 4. * df
+        sigmasq5 += (h5[ii].conjugate() * h5[ii]).real * 4. * df
+
+    sigmasq1 = sigmasq1**0.5
+    sigmasq2 = sigmasq2**0.5
+    sigmasq3 = sigmasq3**0.5
+    sigmasq4 = sigmasq4**0.5
+    sigmasq5 = sigmasq5**0.5
+
+    for ii in range(flen):
+        h1[ii] = h1[ii] / sigmasq1
+        h2[ii] = h2[ii] / sigmasq2
+        h3[ii] = h3[ii] / sigmasq3
+        h4[ii] = h4[ii] / sigmasq4
+        h5[ii] = h5[ii] / sigmasq5
+
 def abs_arg_max_complex(numpy.ndarray [COMPLEXTYPE, ndim=1] a):
     cdef unsigned int xmax = a.shape[0]
     cdef double mag
