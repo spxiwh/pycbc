@@ -464,6 +464,8 @@ class EventManager(object):
                 f['coa_phase_comp_3'] = numpy.angle(self.events['snr_comp_3'])
                 f['coa_phase_comp_4'] = numpy.angle(self.events['snr_comp_4'])
                 f['coa_phase_comp_5'] = numpy.angle(self.events['snr_comp_5'])
+            if 'marg_lnl' in self.events.dtype.names:
+                f['marg_lnl'] = self.events['marg_lnl']
             if 'cont_chisq' in self.events.dtype.names:
                 f['cont_chisq'] = self.events['cont_chisq']
                 # FIXME: Can we get this value from the autochisq instance?
@@ -547,7 +549,7 @@ class EventManager(object):
             temps_per_core = float(self.ntemplates) / float(self.ncores)
             filters_per_core = float(self.nfilters) / float(self.ncores)
             f['search/templates_per_core'] = \
-                numpy.array([float(temps_per_core) * float(time_ratio)])
+                numpy.array([float(temps_per_core) * float(time_ratio[0])])
             f['search/filter_rate_per_core'] = \
                 numpy.array([filters_per_core / float(self.run_time)])
             f['search/setup_time_fraction'] = \
@@ -849,7 +851,7 @@ class EventManagerCoherent(EventManagerMultiDetBase):
                 temps_per_core = float(self.ntemplates) / float(self.ncores)
                 filters_per_core = float(self.nfilters) / float(self.ncores)
                 f['search/templates_per_core'] = \
-                    numpy.array([float(temps_per_core) * float(time_ratio)])
+                    numpy.array([float(temps_per_core) * float(time_ratio[0])])
                 f['search/filter_rate_per_core'] = \
                     numpy.array([filters_per_core / float(self.run_time)])
                 f['search/setup_time_fraction'] = \
@@ -1085,7 +1087,7 @@ class EventManagerMultiDet(EventManagerMultiDetBase):
                 temps_per_core = float(self.ntemplates) / float(self.ncores)
                 filters_per_core = float(self.nfilters) / float(self.ncores)
                 f['search/templates_per_core'] = \
-                    numpy.array([float(temps_per_core) * float(time_ratio)])
+                    numpy.array([float(temps_per_core) * float(time_ratio[0])])
                 f['search/filter_rate_per_core'] = \
                     numpy.array([filters_per_core / float(self.run_time)])
                 f['search/setup_time_fraction'] = \

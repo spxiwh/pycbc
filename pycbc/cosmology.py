@@ -34,7 +34,10 @@ import numpy
 from scipy import interpolate
 import astropy.cosmology
 from astropy import units
-from astropy.cosmology.core import CosmologyError
+try:
+    from astropy.cosmology import CosmologyError
+except ImportError:  # older astropy versions
+    from astropy.cosmology.core import CosmologyError
 from astropy.cosmology import parameters
 import pycbc.conversions
 

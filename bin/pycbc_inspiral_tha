@@ -28,6 +28,7 @@ from multiprocessing import Pool
 import pycbc.version
 import pycbc.opt
 import pycbc.inject
+import pycbc.tha_marginalize as tha_marginalize
 import time
 
 last_progress_update = -1.0
@@ -59,6 +60,20 @@ parser.add_argument("--output", type=str, help="FIXME: ADD")
 parser.add_argument("--bank-file", type=str, help="FIXME: ADD")
 parser.add_argument("--snr-threshold", nargs="+", type=float,
                   help="SNR threshold for trigger generation for each number of harmonics")
+parser.add_argument("--marginalized-grid-file", type=str, default=None,
+                  help="Path to an auxiliary HDF5 file (as written by "
+                       "scripts/build_marg_grid_file.py) with per-template "
+                       "(theta_jn, alpha0, psi) marginalization-grid data, "
+                       "keyed by template_hash. If given, a 'marg_lnl' "
+                       "column (log-likelihood marginalized over "
+                       "sky-orientation-like nuisance parameters, distance "
+                       "and phase) is added to the output triggers. "
+                       "Templates not present in the file get NaN. "
+                       "Experimental: intended for testing with a small "
+                       "number of precomputed templates and a loose "
+                       "--cluster-window so most/all threshold-crossing "
+                       "samples are retained for comparison, not yet for "
+                       "full-bank production use.")
 parser.add_argument("--newsnr-threshold", type=float, metavar='THRESHOLD',
                     help="Cut triggers with NewSNR less than THRESHOLD")
 parser.add_argument("--low-frequency-cutoff", type=float,
@@ -223,6 +238,16 @@ pycbc.opt.verify_optimization_options(opt, parser)
 
 pycbc.init_logging(opt.verbose)
 
+if opt.marginalized_grid_file:
+    logging.info("Loading marginalization grid file %s",
+                 opt.marginalized_grid_file)
+    marg_grid_by_hash, marg_ln_weight = \
+        tha_marginalize.load_grid_file(opt.marginalized_grid_file)
+    logging.info("Loaded marginalization grid data for %d templates",
+                 len(marg_grid_by_hash))
+else:
+    marg_grid_by_hash, marg_ln_weight = None, None
+
 fft.from_cli(opt)
 inj_filter_rejector = pycbc.inject.InjFilterRejector.from_cli(opt)
 ctx = scheme.from_cli(opt)
@@ -307,7 +332,19 @@ def template_triggers(t_num):
                 out_vals['snr_comp_{0}'.format(i + 1)] = numpy.zeros(len(snrv_full), dtype=complex64)
             else:
                 out_vals['snr_comp_{0}'.format(i + 1)] = snr_comp[idx+stilde.analyze.start] * norm
-            
+
+        if marg_grid_by_hash is not None:
+            grid = marg_grid_by_hash.get(int(bank.table.template_hash[t_num]))
+        else:
+            grid = None
+        if grid is not None:
+            marg_z = numpy.array([out_vals['snr_comp_{0}'.format(i + 1)]
+                                  for i in range(5)])
+            out_vals['marg_lnl'] = tha_marginalize.marginalize_segment(
+                grid[0], grid[1], marg_ln_weight, marg_z).astype(float32)
+        else:
+            out_vals['marg_lnl'] = numpy.full(len(snrv_full), numpy.nan,
+                                              dtype=float32)
 
         idx += stilde.cumulative_index
         out_vals['time_index'] = idx
@@ -364,6 +401,7 @@ with ctx:
         'bank_chisq_dof' : int,
         'psd_var_val'    : float32,
         'sigmasq'        : float32,
+        'marg_lnl'       : float32,
                 }
     out_types.update(SingleDetSGChisq.returns)
     out_vals_ref = {key: None for key in out_types}
