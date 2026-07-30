@@ -22,7 +22,7 @@ import numpy as np
 
 import pycbc
 from pycbc import psd as pycbc_psd
-from pycbc.waveform.bank import TemplateBank
+from pycbc.waveform.bank import TemplateBank, PhenomXPTemplate
 from pycbc.waveform.tha_marg_grid import make_theta_alpha_grid, compute_raw_and_ab
 from pycbc.io import HFile
 
@@ -63,13 +63,36 @@ parser.add_argument('--reference-psd-model', default='aLIGOZeroDetHighPower',
 parser.add_argument('--reference-psd-file',
                      help='Alternative to --reference-psd-model: an '
                           'ASD/PSD text file (see pycbc.psd.from_txt).')
-parser.add_argument('--start-index', type=int, default=0,
+parser.add_argument('--start-index', type=int, default=None,
                      help='First template row index (inclusive) to '
-                          'process, for splitting work across jobs.')
+                          'process, for splitting work across jobs by '
+                          'hand. Mutually exclusive with '
+                          '--num-jobs/--job-index (the recommended way '
+                          'to split a run across many parallel jobs; '
+                          'see THA_MARG_INFO.md). Default: 0.')
 parser.add_argument('--end-index', type=int, default=None,
                      help='Last template row index (exclusive) to '
-                          'process. Default: process to the end of the '
-                          'bank.')
+                          'process, for splitting work across jobs by '
+                          'hand. Mutually exclusive with '
+                          '--num-jobs/--job-index. Default: process to '
+                          'the end of the bank.')
+parser.add_argument('--num-jobs', type=int, default=None,
+                     help='Split the bank into this many contiguous, '
+                          'near-equal chunks and process only the one '
+                          'given by --job-index. This is the '
+                          'recommended way to parallelize building a '
+                          'grid file over a full bank across many jobs '
+                          '(e.g. one per HTCondor/Pegasus job); see '
+                          '"Parallelizing" in THA_MARG_INFO.md for the '
+                          'full workflow, including how to combine the '
+                          'resulting per-job files with '
+                          'pycbc_combine_tha_marginalization_grid. '
+                          'Requires --job-index; mutually exclusive '
+                          'with --start-index/--end-index.')
+parser.add_argument('--job-index', type=int, default=None,
+                     help='Which chunk (0-indexed, < --num-jobs) of '
+                          'the bank this job should process. Requires '
+                          '--num-jobs.')
 parser.add_argument('--interp', action='store_true',
                      help='Generate the 5 raw harmonics and grid-point '
                           'waveforms using the "interp=True" fast-'
@@ -84,12 +107,31 @@ parser.add_argument('--interp', action='store_true',
                           'See THA_MARG_INFO.md.')
 opt = parser.parse_args()
 
+if (opt.num_jobs is None) != (opt.job_index is None):
+    parser.error('--num-jobs and --job-index must be given together.')
+if opt.num_jobs is not None and (
+        opt.start_index is not None or opt.end_index is not None):
+    parser.error('--num-jobs/--job-index and --start-index/--end-index '
+                  'are mutually exclusive.')
+if opt.num_jobs is not None and not (0 <= opt.job_index < opt.num_jobs):
+    parser.error('--job-index must satisfy 0 <= job-index < num-jobs.')
+
 pycbc.init_logging(opt.verbose)
 
 bank = TemplateBank(opt.bank_file)
 n_templates = len(bank.table)
-end_index = opt.end_index if opt.end_index is not None else n_templates
-indices = range(opt.start_index, min(end_index, n_templates))
+
+if opt.num_jobs is not None:
+    # Contiguous, near-equal partition (same scheme as numpy.array_split):
+    # any remainder templates are spread one-per-job across the first
+    # jobs, rather than all dumped on the last one.
+    base, rem = divmod(n_templates, opt.num_jobs)
+    start_index = opt.job_index * base + min(opt.job_index, rem)
+    end_index = start_index + base + (1 if opt.job_index < rem else 0)
+else:
+    start_index = opt.start_index if opt.start_index is not None else 0
+    end_index = opt.end_index if opt.end_index is not None else n_templates
+indices = range(start_index, min(end_index, n_templates))
 
 flen = int(opt.sample_rate / 2. / opt.delta_f) + 1
 kmin = int(opt.low_frequency_cutoff / opt.delta_f)
@@ -141,7 +183,7 @@ with HFile(opt.output, 'w') as f:
     f.attrs['n_theta'] = opt.n_theta
     f.attrs['n_alpha'] = opt.n_alpha
     f.attrs['reference_psd_model'] = opt.reference_psd_model or ''
-    f.attrs['start_index'] = opt.start_index
+    f.attrs['start_index'] = start_index
     f.attrs['end_index'] = end_index
     # Generation-provenance metadata. sample_rate/df/low_frequency_cutoff
     # are load-bearing: pycbc_inspiral_tha checks these match its own
@@ -153,6 +195,6 @@ with HFile(opt.output, 'w') as f:
     # always use interp=True with no override (see
     # pycbc.waveform.tha_marg_grid.get_raw_harmonics docstring).
     f.attrs['interp'] = opt.interp
-    f.attrs['approximant'] = tmpl.approximant
+    f.attrs['approximant'] = PhenomXPTemplate.approximant
 
 logging.info("Wrote %d templates to %s", len(template_hash), opt.output)

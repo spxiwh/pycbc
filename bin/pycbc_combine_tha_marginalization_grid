@@ -1,0 +1,122 @@
+#!/usr/bin/env python
+"""
+Combine several marginalization-grid files (as written by
+pycbc_make_tha_marginalization_grid --num-jobs/--job-index or
+--start-index/--end-index) covering disjoint slices of the same
+template bank into a single file.
+
+This is a convenience only: pycbc_inspiral_tha's --marginalized-grid-file
+already accepts multiple files directly and merges them internally, so
+combining is never required to run a search. It is useful when you would
+rather distribute/archive one file than N, or feed a single file into
+other tooling.
+
+See "Parallelizing" in THA_MARG_INFO.md for the full split/combine
+workflow.
+"""
+import argparse
+import logging
+import numpy as np
+
+import pycbc
+from pycbc.io import HFile
+
+# Attrs that describe how the grid was generated and must be identical
+# across every input file for the combined file to be meaningful.
+_SCALAR_ATTRS_MUST_MATCH = [
+    'df', 'kmin', 'kmax', 'sample_rate', 'low_frequency_cutoff',
+    'n_theta', 'n_alpha', 'reference_psd_model', 'interp', 'approximant',
+]
+_GRID_DATASETS_MUST_MATCH = ['theta_grid', 'alpha_grid', 'weights_ta']
+
+parser = argparse.ArgumentParser(description=__doc__)
+pycbc.add_common_pycbc_options(parser)
+parser.add_argument('--input-files', nargs='+', required=True,
+                     help='Two or more grid files to combine (as written '
+                          'by pycbc_make_tha_marginalization_grid).')
+parser.add_argument('--output', required=True,
+                     help='Output HDF5 file.')
+opt = parser.parse_args()
+
+pycbc.init_logging(opt.verbose)
+
+if len(opt.input_files) < 2:
+    parser.error('--input-files needs at least two files to combine.')
+
+template_hash_parts = []
+raws_parts = []
+A_parts = []
+B_parts = []
+beta_parts = []
+ref_attrs = None
+ref_grids = None
+start_indices = []
+end_indices = []
+
+for path in opt.input_files:
+    logging.info("Reading %s", path)
+    with HFile(path, 'r') as f:
+        attrs = dict(f.attrs)
+        grids = {name: f[name][:] for name in _GRID_DATASETS_MUST_MATCH}
+
+        if ref_attrs is None:
+            ref_attrs = attrs
+            ref_grids = grids
+        else:
+            mismatches = [
+                name for name in _SCALAR_ATTRS_MUST_MATCH
+                if attrs.get(name) != ref_attrs.get(name)]
+            if mismatches:
+                raise ValueError(
+                    "{} was generated with different options than {}: "
+                    "{} differ. All input files must have been built "
+                    "with identical pycbc_make_tha_marginalization_grid "
+                    "options (only --start-index/--end-index or "
+                    "--job-index should differ) -- see THA_MARG_INFO.md."
+                    .format(path, opt.input_files[0],
+                            ", ".join(mismatches)))
+            for name in _GRID_DATASETS_MUST_MATCH:
+                if not np.array_equal(grids[name], ref_grids[name]):
+                    raise ValueError(
+                        "{} was generated with a different {} than {} "
+                        "-- did --n-theta/--n-alpha differ between "
+                        "input files?".format(
+                            path, name, opt.input_files[0]))
+
+        template_hash_parts.append(f['template_hash'][:])
+        raws_parts.append(f['raws'][:])
+        A_parts.append(f['A'][:])
+        B_parts.append(f['B'][:])
+        beta_parts.append(f['beta'][:])
+        start_indices.append(int(attrs['start_index']))
+        end_indices.append(int(attrs['end_index']))
+
+template_hash = np.concatenate(template_hash_parts)
+uniq, counts = np.unique(template_hash, return_counts=True)
+dupes = uniq[counts > 1]
+if len(dupes):
+    logging.warning(
+        "%d template_hash value(s) appear in more than one input file "
+        "(e.g. %s) -- the input files' index ranges were not disjoint. "
+        "This is not fatal (pycbc_inspiral_tha's lookup is by hash, so "
+        "the duplicate just wastes space) but usually indicates a "
+        "mistake in how --start-index/--end-index or --job-index were "
+        "chosen.", len(dupes), dupes[:5].tolist())
+
+with HFile(opt.output, 'w') as f:
+    f.create_dataset('template_hash', data=template_hash)
+    f.create_dataset('raws', data=np.concatenate(raws_parts, axis=0))
+    f.create_dataset('A', data=np.concatenate(A_parts, axis=0))
+    f.create_dataset('B', data=np.concatenate(B_parts, axis=0))
+    f.create_dataset('beta', data=np.concatenate(beta_parts, axis=0))
+    for name in _GRID_DATASETS_MUST_MATCH:
+        f.create_dataset(name, data=ref_grids[name])
+    for name in _SCALAR_ATTRS_MUST_MATCH:
+        f.attrs[name] = ref_attrs[name]
+    # start_index/end_index no longer describe a single contiguous slice
+    # once combined; keep the overall span for information only.
+    f.attrs['start_index'] = min(start_indices)
+    f.attrs['end_index'] = max(end_indices)
+
+logging.info("Wrote %d templates (from %d input files) to %s",
+             len(template_hash), len(opt.input_files), opt.output)

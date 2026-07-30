@@ -48,6 +48,25 @@ waveform generation needed) and marginalized analytically over
 luminosity distance and orbital phase, gives a marginalized
 log-likelihood `lnL(θ, psi)`.
 
+**Orbital phase (`phi0`)**: notice `phi0` is not a grid parameter, and
+does not appear anywhere in the grid file. It doesn't need to be: `phi0`
+enters every harmonic as an *exact* global phase,
+`h(θ, phi0, psi) = exp(2j·phi0)·h(θ, 0, psi)` (checked directly during
+development, not assumed — see §6). A phase shift of the template only
+rotates the complex overlap `(d|h)` by `exp(2j·phi0)`, so the integral
+`∫dphi0 exp(lnL(θ, phi0, psi))` depends only on `|(d|h)|` and can be done
+in closed form via a modified Bessel function `I0` — this is exactly
+what `LookupTableMarginalizedPhase22` (§3) already does (it's the same
+analytic-phase-marginalization trick standard elsewhere in
+PyCBC/cogwheel for quadrupole(`|m|=2`)-dominated signals, applied here
+per-harmonic-combination instead of per-mode). Because of this,
+`compute_raw_and_ab` generates each `(theta_jn, alpha0)` grid point's
+`h+`/`hx` at a single, arbitrary, fixed `phi0` (hardcoded to `0`) with
+no loss of generality — any other choice of `phi0` would just rotate
+every grid point's waveform by the same overall phase, which the
+`I0`-based marginalization integrates out exactly regardless, so there
+is nothing to gain from making `phi0` a grid dimension.
+
 `marg_lnl` is
 
 ```
@@ -91,8 +110,12 @@ strongly-precessing (`num_comps` 4-5) templates.
   `(theta_jn, alpha0)` grid's expansion coefficients for one template
   (`compute_raw_and_ab`).
 * `pycbc_make_tha_marginalization_grid` — the executable that builds
-  the auxiliary input file over a bank (or a slice of one). This is the
-  "done once" step.
+  the auxiliary input file over a bank (or a slice of one, for
+  parallelizing across jobs — see §4). This is the "done once" step.
+* `pycbc_combine_tha_marginalization_grid` — optional convenience
+  executable that merges several split-job grid files into one (see
+  §4); never required, since `pycbc_inspiral_tha` can load multiple
+  grid files directly.
 * `pycbc_inspiral_tha --marginalized-grid-file <path>` — the search-time
   flag that turns this on (accepts multiple paths for split-job grid
   files, see §4). Adds a `marg_lnl` column (float32, NaN for templates
@@ -189,15 +212,56 @@ full-bank run, rather than trusting a number measured under different
 conditions. The output file's size is dominated by the 5 cached raw
 harmonics per template (their length is set by
 `--sample-rate`/`--delta-f`), not by the grid resolution. For a full
-~500k-template bank this is a non-trivial amount of compute and disk;
-use `--start-index`/`--end-index` to split the job (e.g. one job per few
-thousand templates), writing a separate output file per job.
-`pycbc_inspiral_tha --marginalized-grid-file` accepts multiple files
-(`--marginalized-grid-file GRID_0.hdf GRID_1.hdf ...`) and merges them,
-so there is no need to concatenate the split outputs into one file
-first. The format is keyed by `template_hash`, robust to bank
-thinning/reordering, so partial files are fine as long as their union
-covers every template actually being searched.
+~500k-template bank this is a non-trivial amount of compute and disk,
+so you will want to parallelize it — see below.
+
+**Parallelizing across jobs**: `--num-jobs N --job-index I` (`I` from
+`0` to `N-1`) splits the bank into `N` contiguous, near-equal chunks and
+processes only chunk `I`, writing one output file per job:
+
+```
+pycbc_make_tha_marginalization_grid \
+    --bank-file BANK.hdf --output GRID_${I}.hdf \
+    --sample-rate 2048 --delta-f 0.00390625 --low-frequency-cutoff 20 \
+    --num-jobs 100 --job-index ${I} \
+    ...  # same options otherwise, identical across every job
+```
+
+This is the intended way to run this as an HTCondor/Pegasus-style job
+array (one job per `${I}` in `0..N-1`); every job needs the exact same
+options apart from `--job-index`, since §4's "must exactly match"
+requirement applies across jobs too (mismatched `--interp` or
+`--n-theta`/`--n-alpha` between jobs building "the same" grid file will
+be caught by `pycbc_combine_tha_marginalization_grid` below, but is
+still a mistake to avoid). If you need finer manual control instead
+(e.g. uneven chunks), `--start-index`/`--end-index` remain available
+and are mutually exclusive with `--num-jobs`/`--job-index`.
+
+You do **not** need to combine the `N` output files before running a
+search: `pycbc_inspiral_tha --marginalized-grid-file` accepts multiple
+files directly (`--marginalized-grid-file GRID_0.hdf GRID_1.hdf ...`)
+and merges them internally. The format is keyed by `template_hash`,
+robust to bank thinning/reordering, so partial files are fine as long
+as their union covers every template actually being searched. Combining
+is purely a convenience (fewer files to track/archive/distribute); if
+you want it anyway, `pycbc_combine_tha_marginalization_grid` merges any
+number of these files into one:
+
+```
+pycbc_combine_tha_marginalization_grid \
+    --input-files GRID_0.hdf GRID_1.hdf ... GRID_99.hdf \
+    --output GRID_combined.hdf
+```
+
+It checks that every input file was built with identical generation
+options (same `--sample-rate`/`--delta-f`/`--low-frequency-cutoff`/
+`--interp`/`--n-theta`/`--n-alpha`/`--reference-psd-model` — i.e. that
+they really are slices of "the same" grid, not accidentally different
+configurations) and raises a clear error naming the mismatching
+option(s) if not, and warns (without failing) if the same
+`template_hash` shows up in more than one input file, which usually
+means the `--start-index`/`--end-index` or `--job-index` ranges used to
+build them overlapped by mistake.
 
 ## 5. Correctness notes worth knowing before extending this
 
@@ -318,5 +382,6 @@ area, not inside the `pycbc` checkout) are not needed to build the grid
 file or run a search — everything required for that lives inside
 `pycbc` as described above. They're there if useful for further
 investigation (e.g. the grid-resolution convergence study, the
-phase-consistency checks, the injection-recovery tests referenced in
-§2), but are not part of the production path.
+`check_phi0_factorization.py` check referenced in §2, the
+phase-consistency checks, the injection-recovery tests), but are not
+part of the production path.
