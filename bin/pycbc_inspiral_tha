@@ -60,20 +60,19 @@ parser.add_argument("--output", type=str, help="FIXME: ADD")
 parser.add_argument("--bank-file", type=str, help="FIXME: ADD")
 parser.add_argument("--snr-threshold", nargs="+", type=float,
                   help="SNR threshold for trigger generation for each number of harmonics")
-parser.add_argument("--marginalized-grid-file", type=str, default=None,
-                  help="Path to an auxiliary HDF5 file (as written by "
-                       "scripts/build_marg_grid_file.py) with per-template "
-                       "(theta_jn, alpha0, psi) marginalization-grid data, "
-                       "keyed by template_hash. If given, a 'marg_lnl' "
-                       "column (log-likelihood marginalized over "
-                       "sky-orientation-like nuisance parameters, distance "
-                       "and phase) is added to the output triggers. "
-                       "Templates not present in the file get NaN. "
-                       "Experimental: intended for testing with a small "
-                       "number of precomputed templates and a loose "
-                       "--cluster-window so most/all threshold-crossing "
-                       "samples are retained for comparison, not yet for "
-                       "full-bank production use.")
+parser.add_argument("--marginalized-grid-file", type=str, nargs='+', default=None,
+                  help="Path(s) to one or more auxiliary HDF5 files (as "
+                       "written by pycbc_make_tha_marginalization_grid) "
+                       "with per-template, PSD-independent 5-harmonic "
+                       "marginalization-grid data, keyed by template_hash "
+                       "(pass multiple files if the bank was processed in "
+                       "several split jobs). If given, a 'marg_lnl' column "
+                       "(log-likelihood marginalized over the "
+                       "sky-orientation-like nuisance parameters theta_jn, "
+                       "alpha0, psi, and analytically over distance and "
+                       "phase) is added to the output triggers. Templates "
+                       "not present in any of the given files get NaN. See "
+                       "THA_MARG_INFO.md.")
 parser.add_argument("--newsnr-threshold", type=float, metavar='THRESHOLD',
                     help="Cut triggers with NewSNR less than THRESHOLD")
 parser.add_argument("--low-frequency-cutoff", type=float,
@@ -239,14 +238,14 @@ pycbc.opt.verify_optimization_options(opt, parser)
 pycbc.init_logging(opt.verbose)
 
 if opt.marginalized_grid_file:
-    logging.info("Loading marginalization grid file %s",
-                 opt.marginalized_grid_file)
-    marg_grid_by_hash, marg_ln_weight = \
-        tha_marginalize.load_grid_file(opt.marginalized_grid_file)
+    marg_grid_by_hash = {}
+    for _grid_path in opt.marginalized_grid_file:
+        logging.info("Loading marginalization grid file %s", _grid_path)
+        marg_grid_by_hash.update(tha_marginalize.load_raw_grid_file(_grid_path))
     logging.info("Loaded marginalization grid data for %d templates",
                  len(marg_grid_by_hash))
 else:
-    marg_grid_by_hash, marg_ln_weight = None, None
+    marg_grid_by_hash = None
 
 fft.from_cli(opt)
 inj_filter_rejector = pycbc.inject.InjFilterRejector.from_cli(opt)
@@ -256,6 +255,49 @@ gwstrain = strain.from_cli(opt, dyn_range_fac=DYN_RANGE_FAC,
                            inj_filter_rejector=inj_filter_rejector)
 
 strain_segments = strain.StrainSegments.from_cli(opt, gwstrain)
+
+if marg_grid_by_hash is not None:
+    # Fail fast if any loaded grid file was built for a different
+    # frequency binning / low-frequency-cutoff than this run: raws is
+    # sampled at a fixed delta_f/kmin/kmax baked in at grid-build time,
+    # and re-deriving the orthonormal filters (pycbc.filter.tha_marginalize)
+    # silently produces meaningless results if that binning doesn't
+    # match this segment's PSD, rather than raising -- so we check the
+    # metadata up front instead of relying only on the array-length
+    # check inside the per-segment loop below.
+    for _grid_path in opt.marginalized_grid_file:
+        _attrs = tha_marginalize.load_raw_grid_file_attrs(_grid_path)
+        _mismatches = []
+        if abs(_attrs['df'] - strain_segments.delta_f) > 1e-12:
+            _mismatches.append(
+                "delta_f (grid: {}, this run: {})".format(
+                    _attrs['df'], strain_segments.delta_f))
+        if abs(_attrs['sample_rate'] - opt.sample_rate) > 1e-6:
+            _mismatches.append(
+                "sample_rate (grid: {}, this run: {})".format(
+                    _attrs['sample_rate'], opt.sample_rate))
+        if abs(_attrs['low_frequency_cutoff'] -
+               opt.low_frequency_cutoff) > 1e-6:
+            _mismatches.append(
+                "low_frequency_cutoff (grid: {}, this run: {})".format(
+                    _attrs['low_frequency_cutoff'],
+                    opt.low_frequency_cutoff))
+        if _mismatches:
+            raise ValueError(
+                "Marginalization grid file {} was built with options "
+                "that do not match this run: {}. The grid file's "
+                "--sample-rate/--delta-f (1/--segment-length) and "
+                "--low-frequency-cutoff must exactly match this "
+                "search's configuration -- rebuild it with "
+                "pycbc_make_tha_marginalization_grid using matching "
+                "values. See THA_MARG_INFO.md.".format(
+                    _grid_path, "; ".join(_mismatches)))
+        logging.info(
+            "Marginalization grid file %s: sample_rate=%s delta_f=%s "
+            "low_frequency_cutoff=%s interp=%s approximant=%s -- OK",
+            _grid_path, _attrs['sample_rate'], _attrs['df'],
+            _attrs['low_frequency_cutoff'], _attrs.get('interp'),
+            _attrs.get('approximant'))
 
 def template_triggers(t_num):
     """ Get the triggers for a specific template
@@ -338,10 +380,24 @@ def template_triggers(t_num):
         else:
             grid = None
         if grid is not None:
+            segment_psd = numpy.asarray(stilde.psd.data)
+            if len(segment_psd) != len(grid['raws'][0]):
+                raise ValueError(
+                    "marginalized-grid-file frequency binning does not "
+                    "match this segment's PSD (grid has {} bins, segment "
+                    "has {}). The grid file's --sample-rate/--delta-f "
+                    "must exactly match this search's configuration; "
+                    "see THA_MARG_INFO.md.".format(
+                        len(grid['raws'][0]), len(segment_psd)))
             marg_z = numpy.array([out_vals['snr_comp_{0}'.format(i + 1)]
                                   for i in range(5)])
-            out_vals['marg_lnl'] = tha_marginalize.marginalize_segment(
-                grid[0], grid[1], marg_ln_weight, marg_z).astype(float32)
+            # Re-derives the actual (PSD-dependent) filters for THIS
+            # segment's real, estimated PSD from the PSD-independent
+            # cached grid data -- cheap (5x5 linear algebra plus small
+            # matrix products), no lalsimulation calls. See
+            # THA_MARG_INFO.md.
+            out_vals['marg_lnl'] = tha_marginalize.marginalize_for_psd(
+                grid, segment_psd, marg_z).astype(float32)
         else:
             out_vals['marg_lnl'] = numpy.full(len(snrv_full), numpy.nan,
                                               dtype=float32)

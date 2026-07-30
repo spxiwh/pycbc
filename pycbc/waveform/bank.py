@@ -1244,6 +1244,10 @@ def compute_beta(tmplt):
 
     return np.arccos(jhatz)
 
+def _rulog2(val):
+    """Round up to the next power of 2."""
+    return 2.0 ** np.ceil(np.log2(float(val)))
+
 class _PhenomTemplate():
 
     def __init__(self, template_params, sample_rate, f_lower):
@@ -1346,6 +1350,27 @@ class _PhenomTemplate():
             lalsim.GetApproximantFromString(self.approximant)
         )
 
+    # How much extra time to allow for ringdown, and safety margin because
+    # duration estimation can be bad, when picking the coarse df_min used
+    # by the interp=True "generate coarse, then upsample" shortcut. Shared
+    # (via get_interp_df_min/_interpolate_up below) by anything that needs
+    # to reproduce that shortcut's exact conventions, e.g.
+    # pycbc.waveform.tha_marg_grid's grid-point generation.
+    _INTERP_EXTRA_PADDING = 3
+    _INTERP_SAFETY = 10
+
+    @staticmethod
+    def _shift_convention(data, epoch, df):
+        """Wrap a raw lalsimulation FD waveform array as a FrequencySeries,
+        applying the cyclic time shift needed to correct Phenom's
+        non-standard FD merger-placement convention: Phenom does not obey
+        the convention of having the merger at the end of the returned
+        vector, and follows the T-domain convention instead of setting
+        epoch, so this is needed for anything downstream that assumes the
+        merger is at the end (e.g. interpolation, matched filtering)."""
+        new = FrequencySeries(data[:], delta_f=df, epoch=epoch, copy=False)
+        return new.cyclic_time_shift(new.end_time)
+
     def gen_harmonics_comp(self, thetaJN, alpha0, phi0, psi, df, f_final):
         # generate hp, hc
         hp, hc = self.gen_hp_hc(thetaJN, alpha0, phi0, df, f_final)
@@ -1358,42 +1383,27 @@ class _PhenomTemplate():
         # 1908.05707 defines phi in J-aligned frame. Need to rotate to
         # L-aligned frame
         h *= np.exp(2j * _dphi(thetaJN, alpha0, self.beta))
-        # create LAL frequency array and return precessing harmonic
+        # create LAL frequency array and return precessing harmonic,
+        # correcting Phenom's FD merger-placement convention
+        return self._shift_convention(h, hp.epoch, df)
 
-        new = FrequencySeries(h[:], delta_f=df, epoch=hp.epoch, copy=False)
+    def get_interp_df_min(self):
+        """The coarse delta_f used by the interp=True "generate coarse,
+        then upsample" shortcut (get_interpolated_harmonic_comp) for this
+        template."""
+        return 1.0 / _rulog2(
+            self.duration + self._INTERP_EXTRA_PADDING + self._INTERP_SAFETY)
 
-        # Phenom is *very* annoying for a F-domain waveform, and does not
-        # obey the convention of having the merger at the end of the returned
-        # vector. It follow the T-domain convention instead of setting epoch.
-        # We therefore need to correct this.
-        new = new.cyclic_time_shift(new.end_time)
-
-        return new
-
-    def get_interpolated_harmonic_comp(
-        self, thetaJN, alpha0, phi0, psi, df, f_final
-    ):
-        # Waveform generation is a problem.
-        # Compressed waveforms would be an option, but the file size will be
-        # challenging. I'm trying out the idea of "INTERP" waveforms instead,
-        # where we generate waveforms at much larger frequency spacing and then
-        # upsample. (Technically these don't actually interpolate, but it's a
-        # good way to explain the idea of what it's doing ..).
+    def _interpolate_up(self, small, df):
+        """Upsample a FrequencySeries generated at get_interp_df_min() up
+        to the target df, following the same padding/offset conventions
+        as get_interpolated_harmonic_comp (so it can be reused for
+        anything else generated at that same coarse resolution, e.g.
+        pycbc.waveform.tha_marg_grid's grid-point h+/hx)."""
         from pycbc.filter import interpolate_complex_frequency
 
-        def rulog2(val):
-            return 2.0 ** np.ceil(np.log2(float(val)))
-
-
-        extra_padding = 3 # This basically sets how much to allow for ringdown
-        safety = 10 # Add extra window because duration estimation can be bad
-        df_min = 1.0 / rulog2(self.duration + extra_padding + safety)
-
-        small = self.gen_harmonics_comp(
-            thetaJN, alpha0, phi0, psi, df_min, f_final
-        )
-
-        offset = int(extra_padding * (len(small)-1)*2 * small.delta_f)
+        offset = int(self._INTERP_EXTRA_PADDING * (len(small) - 1)
+                     * 2 * small.delta_f)
 
         large = interpolate_complex_frequency(small, df, zeros_offset=offset,
                                               side='left')
@@ -1404,6 +1414,21 @@ class _PhenomTemplate():
         large.start_time = small.start_time - extra_time
 
         return large
+
+    def get_interpolated_harmonic_comp(
+        self, thetaJN, alpha0, phi0, psi, df, f_final
+    ):
+        # Waveform generation is a problem.
+        # Compressed waveforms would be an option, but the file size will be
+        # challenging. I'm trying out the idea of "INTERP" waveforms instead,
+        # where we generate waveforms at much larger frequency spacing and then
+        # upsample. (Technically these don't actually interpolate, but it's a
+        # good way to explain the idea of what it's doing ..).
+        df_min = self.get_interp_df_min()
+        small = self.gen_harmonics_comp(
+            thetaJN, alpha0, phi0, psi, df_min, f_final
+        )
+        return self._interpolate_up(small, df)
 
     def compute_waveform_five_comps(self, df, f_final, num_comps=5, interp=True):
         if interp:

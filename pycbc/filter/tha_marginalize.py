@@ -3,17 +3,30 @@ Runtime support for the 5-harmonic precessing-search marginalized-SNR
 statistic (marginalizing over sky-orientation-like nuisance parameters
 theta_jn, alpha0, psi, and analytically over distance and phase).
 
-This module intentionally has minimal dependencies (numpy/scipy only)
-so it can be imported directly by pycbc_inspiral_tha without pulling in
-lalsimulation or the offline bank-time precompute machinery (which lives
-in a separate script, since it needs to generate waveforms and is far
-too slow to run inline during filtering).
+This module intentionally has minimal dependencies (numpy/scipy only,
+no lalsimulation) so it can be imported and called cheaply inside
+pycbc_inspiral_tha's per-segment filtering loop.
 
-The per-template geometry (grid projection coefficients ``M``, fixed
-per-grid-point powers ``hh``, and shared log-prior-weights
-``ln_weight``) is computed once offline (see
-scripts/build_marg_grid_file.py in the THA precession-marginalization
-work) and loaded here via ``load_grid_file``.
+Two kinds of per-template data are involved:
+
+* PSD-independent (computed once, offline, by
+  ``pycbc_make_tha_marginalization_grid`` / ``pycbc.waveform.tha_marg_grid``,
+  which does need lalsimulation): the raw (unwhitened) harmonics
+  ``h1_raw..h5_raw`` and the ``(n_grid, 5)`` coefficient matrices ``A``,
+  ``B`` expressing the (theta_jn, alpha0) orientation grid's h+/hx
+  exactly as linear combinations of the raw harmonics. These are valid
+  for the template regardless of noise PSD and are loaded here via
+  ``load_raw_grid_file``.
+
+* PSD-dependent (cheap, recomputed here on the fly for whatever PSD the
+  current segment actually has -- no lalsimulation involved, only 5x5
+  linear algebra plus small matrix products): the actual orthonormal
+  filters' projection coefficients ``Ep``/``Ec`` and self/cross powers
+  ``hh_pp``/``hh_cc``/``hh_pc``, folded together with a psi quadrature
+  into the final ``M``/``hh``/``ln_weight`` consumed by
+  ``marginalize_segment``.
+
+See THA_MARG_INFO.md for the full derivation and rationale.
 """
 from pathlib import Path
 import numpy as np
@@ -184,25 +197,209 @@ def marginalize_segment(M, hh, ln_weight, z, lookup_table=None):
     return lnl_marg[0] if scalar_input else lnl_marg
 
 
-def load_grid_file(path):
+def weighted_correlation(a, b, psd, df, kmin, kmax):
     """
-    Load an auxiliary per-template marginalization-grid file (as written
-    by scripts/build_marg_grid_file.py).
+    <a|b>_psd = 4*df*sum(conj(a)*b/psd), for raw (unwhitened) arrays a, b.
+    Restricted to [kmin, kmax) to avoid dividing by psd==0 out of band
+    (a, b are assumed already zero there, but 0/0 would still give NaN).
+    """
+    return 4. * df * np.sum(a[kmin:kmax].conj() * b[kmin:kmax] / psd[kmin:kmax])
+
+
+def raw_gram_matrix(raws, psd, df, kmin, kmax):
+    """5x5 Hermitian Gram matrix Graw[j,k] = <v_j|v_k>_psd."""
+    n = len(raws)
+    G = np.zeros((n, n), dtype=np.complex128)
+    for j in range(n):
+        for k in range(j, n):
+            val = weighted_correlation(raws[j], raws[k], psd, df, kmin, kmax)
+            G[j, k] = val
+            G[k, j] = val.conjugate()
+    return G
+
+
+def derive_gram_schmidt_transform(Graw, rel_floor=1e-10):
+    """
+    Derive (T, sigma) such that, with ĥ_j = v_j/(asd*sigma_j),
+    e_k = sum_j T[k,j] * ĥ_j reproduces exactly the same modified
+    Gram-Schmidt procedure as pycbc.waveform.bank._PhenomTemplate's
+    whiten_and_normalize()+orthogonalize() (first vector unmodified,
+    sequential orthogonalize-then-renormalize), operating purely on the
+    5x5 Gram matrix -- no frequency arrays, no lalsimulation.
+
+    Weakly-precessing templates can have one or more of the 5 raw
+    harmonics carry ~zero power under a given PSD (this is exactly why
+    the search truncates them via num_comps in the first place; here we
+    always keep all 5 slots, so the zero-power case must be handled
+    explicitly rather than relying on truncation to avoid it). Any
+    harmonic (or intermediate Gram-Schmidt residual) with norm below
+    ``rel_floor`` times the largest one is treated as exactly zero
+    (decoupled, contributing nothing) instead of raising a
+    divide-by-zero.
+    """
+    n = Graw.shape[0]
+    sigma = np.sqrt(np.abs(Graw.diagonal().real))
+    tiny = sigma.max() * rel_floor if sigma.max() > 0 else 0.
+    usable = sigma > tiny
+    sigma_safe = np.where(usable, sigma, 1.)
+    Gn = Graw / np.outer(sigma_safe, sigma_safe)
+    Gn[~usable, :] = 0.
+    Gn[:, ~usable] = 0.
+
+    C = np.eye(n, dtype=np.complex128)  # C[j,:]: coeffs of "arrs[j]" in terms of ĥ_1..ĥ_n
+
+    def gram_of(C):
+        return C.conj() @ Gn @ C.T  # M[i,j] = <arrs[i]|arrs[j]>
+
+    M = gram_of(C)
+    for i in range(n):
+        for j in range(i + 1, n):
+            corr = M[i, j]
+            C[j, :] = C[j, :] - corr * C[i, :]
+        M = gram_of(C)
+        for j in range(i + 1, n):
+            norm = M[j, j].real
+            if norm > tiny ** 2:
+                C[j, :] = C[j, :] / norm ** 0.5
+            else:
+                C[j, :] = 0.
+        M = gram_of(C)
+
+    return C, sigma_safe  # T = C; sigma_safe never introduces a NaN downstream
+
+
+def derive_ep_ec_hh(raws, A, B, psd, df, kmin, kmax):
+    """
+    Cheap re-derivation of Ep, Ec, hh_pp, hh_cc, hh_pc for an arbitrary
+    PSD, from the PSD-independent raws/A/B (see
+    pycbc.waveform.tha_marg_grid). No lalsimulation calls; only 5x5
+    linear algebra plus (n_grid x 5) matrix products.
+    """
+    Graw = raw_gram_matrix(raws, psd, df, kmin, kmax)
+    T, sigma = derive_gram_schmidt_transform(Graw)
+    Gn = Graw / np.outer(sigma, sigma)
+
+    M = (T.conj() @ Gn) * sigma[None, :]  # M[k,j] = <e_k|v_j>_psd
+
+    Ep = A @ M.T
+    Ec = B @ M.T
+
+    hh_pp = np.einsum('ij,jk,ik->i', A.conj(), Graw, A).real
+    hh_cc = np.einsum('ij,jk,ik->i', B.conj(), Graw, B).real
+    hh_pc = np.einsum('ij,jk,ik->i', A.conj(), Graw, B)
+
+    return Ep, Ec, hh_pp, hh_cc, hh_pc
+
+
+def fold_psi(Ep, Ec, hh_pp, hh_cc, hh_pc, dpsi, weights_ta, n_psi):
+    """
+    Fold a psi quadrature (psi enters only via a real rotation of two
+    already-computed complex numbers -- no new waveform generation) into
+    the (theta_jn, alpha0) grid's Ep/Ec/hh, producing the combined
+    (n_grid*n_psi, 5) M matrix, (n_grid*n_psi,) hh vector, and
+    (n_grid*n_psi,) log-weight vector consumed by marginalize_segment.
+    """
+    psi_grid = (np.arange(n_psi) + 0.5) * (np.pi / n_psi)
+    weight_psi = np.full(n_psi, 1. / n_psi)
+
+    n_ta = Ep.shape[0]
+    M = np.zeros((n_ta, n_psi, 5), dtype=np.complex128)
+    hh = np.zeros((n_ta, n_psi))
+    ln_weight = np.zeros((n_ta, n_psi))
+    for p, psi in enumerate(psi_grid):
+        delta = psi - dpsi
+        c2, s2 = np.cos(2 * delta), np.sin(2 * delta)
+        M[:, p, :] = c2[:, None] * Ep.conj() - s2[:, None] * Ec.conj()
+        hh[:, p] = (c2 ** 2) * hh_pp - 2 * c2 * s2 * hh_pc.real + (s2 ** 2) * hh_cc
+        ln_weight[:, p] = np.log(weights_ta) + np.log(weight_psi[p])
+
+    return M.reshape(-1, 5), hh.reshape(-1), ln_weight.reshape(-1)
+
+
+def marginalize_for_psd(template_grid, psd, z, n_psi=16, lookup_table=None):
+    """
+    All-in-one per-segment call: given a template's PSD-independent grid
+    data (as returned by one entry of ``load_raw_grid_file``) and the
+    segment's actual PSD, cheaply re-derive the orientation/psi grid for
+    that PSD and marginalize the given snr_comp_1..5 sample(s).
+
+    Parameters
+    ----------
+    template_grid : dict
+        One value from the dict returned by ``load_raw_grid_file``, with
+        keys 'raws', 'A', 'B', 'dpsi', 'weights_ta'.
+    psd : (n_freq,) float array
+    z : (5,) or (5, n_time) complex array
+        snr_comp_1..5.
+    n_psi : int
+        Psi quadrature resolution.
+    lookup_table : LookupTableMarginalizedPhase22, optional
+
+    Returns
+    -------
+    lnl_marg : float or (n_time,) float array
+    """
+    Ep, Ec, hh_pp, hh_cc, hh_pc = derive_ep_ec_hh(
+        template_grid['raws'], template_grid['A'], template_grid['B'],
+        psd, template_grid['df'], template_grid['kmin'], template_grid['kmax'])
+    M, hh, ln_weight = fold_psi(Ep, Ec, hh_pp, hh_cc, hh_pc,
+                                template_grid['dpsi'], template_grid['weights_ta'],
+                                n_psi)
+    return marginalize_segment(M, hh, ln_weight, z, lookup_table=lookup_table)
+
+
+def load_raw_grid_file(path):
+    """
+    Load an auxiliary per-template PSD-independent grid file (as written
+    by ``pycbc_make_tha_marginalization_grid`` /
+    ``pycbc.waveform.tha_marg_grid.build_raw_grid_file``).
 
     Returns
     -------
     grid_by_hash : dict
-        Maps int(template_hash) -> (M, hh) pair, ready to pass to
-        ``marginalize_segment`` along with the shared ``ln_weight``.
-    ln_weight : (n_grid,) float array
-        Shared across all templates in the file.
+        Maps int(template_hash) -> dict with keys 'raws' (list of 5
+        complex arrays), 'A', 'B' ((n_grid, 5) complex arrays), 'dpsi'
+        ((n_grid,) float array), 'weights_ta' ((n_grid,) float array),
+        'df', 'kmin', 'kmax' (shared metadata, duplicated per template
+        for convenience).
     """
     grid_by_hash = {}
     with h5py.File(path, 'r') as f:
-        ln_weight = f['ln_weight'][:]
+        df = float(f.attrs['df'])
+        kmin = int(f.attrs['kmin'])
+        kmax = int(f.attrs['kmax'])
+        theta_grid = f['theta_grid'][:]
+        alpha_grid = f['alpha_grid'][:]
+        weights_ta = f['weights_ta'][:]
         template_hash = f['template_hash'][:]
-        M_all = f['M'][:]
-        hh_all = f['hh'][:]
+        raws_all = f['raws'][:]      # (n_templates, 5, n_freq) complex
+        A_all = f['A'][:]            # (n_templates, n_grid, 5) complex
+        B_all = f['B'][:]
+        beta_all = f['beta'][:]      # (n_templates,) float
+
         for i, h in enumerate(template_hash):
-            grid_by_hash[int(h)] = (M_all[i], hh_all[i])
-    return grid_by_hash, ln_weight
+            dpsi = _dpsi_grid(theta_grid, alpha_grid, beta_all[i])
+            grid_by_hash[int(h)] = dict(
+                raws=[raws_all[i, k] for k in range(5)],
+                A=A_all[i], B=B_all[i], dpsi=dpsi, weights_ta=weights_ta,
+                df=df, kmin=kmin, kmax=kmax)
+    return grid_by_hash
+
+
+def load_raw_grid_file_attrs(path):
+    """
+    Read just the generation-provenance attrs of a marginalization grid
+    file (see pycbc_make_tha_marginalization_grid), without loading any
+    of the (potentially large) per-template datasets. Used by
+    pycbc_inspiral_tha to check the grid file's generation options
+    (sample_rate, delta_f/df, low_frequency_cutoff, interp) match this
+    run's before using it.
+    """
+    with h5py.File(path, 'r') as f:
+        return dict(f.attrs)
+
+
+def _dpsi_grid(theta_grid, alpha_grid, beta):
+    """Vectorized-by-loop wrapper around pycbc.waveform.bank._dpsi."""
+    from pycbc.waveform.bank import _dpsi
+    return np.array([_dpsi(t, a, beta) for t, a in zip(theta_grid, alpha_grid)])
