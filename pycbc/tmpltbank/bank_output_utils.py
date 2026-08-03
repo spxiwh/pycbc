@@ -306,7 +306,14 @@ def output_bank_to_hdf(outputFile, tempBank, optDict=None, programName='',
         Allows unused options to be passed to this function (for modularity)
     """
     bank_dict = {}
-    mass1, mass2, spin1z, spin2z = list(zip(*tempBank))
+    # Take the columns as numpy arrays rather than list(zip(*tempBank)), which
+    # would materialise four Python-object tuples (~40 bytes/value instead of
+    # 8) - prohibitively expensive for banks of tens of millions of templates.
+    tempBank = numpy.asarray(tempBank)
+    mass1 = tempBank[:, 0]
+    mass2 = tempBank[:, 1]
+    spin1z = tempBank[:, 2]
+    spin2z = tempBank[:, 3]
     bank_dict['mass1'] = mass1
     bank_dict['mass2'] = mass2
     bank_dict['spin1z'] = spin1z

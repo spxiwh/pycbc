@@ -78,22 +78,27 @@ if options.input_files:
 else:
     input_files = glob.glob(options.input_glob)
 
-mass1 = []
-mass2 = []
-spin1z = []
-spin2z = []
+# Accumulate the accepted templates into a single preallocated numpy array.
+# Using numpy throughout (rather than Python lists of floats) keeps each value
+# as a packed 8-byte double instead of a ~40-byte Python object, which matters
+# a great deal when concatenating tens of thousands of split-bank files.
+# First pass: total number of templates, reading dataset metadata only.
+n_total = 0
 for inp_file in input_files:
-    inp_fp = HFile(inp_file, 'r')
-    data = inp_fp['accepted_templates'][:]
-    if len(data) == 0:
-        continue
-    mass1.extend(data[:,1])
-    mass2.extend(data[:,2])
-    spin1z.extend(data[:,3])
-    spin2z.extend(data[:,4])
-    inp_fp.close()
+    with HFile(inp_file, 'r') as inp_fp:
+        n_total += inp_fp['accepted_templates'].shape[0]
 
-temp_bank = numpy.array([mass1,mass2,spin1z,spin2z]).T
+# Second pass: copy columns 1-4 (mass1, mass2, spin1z, spin2z; column 0 is the
+# lattice index and column 5 the mismatch) straight into the output array.
+temp_bank = numpy.empty((n_total, 4), dtype=numpy.float64)
+offset = 0
+for inp_file in input_files:
+    with HFile(inp_file, 'r') as inp_fp:
+        accepted = inp_fp['accepted_templates']
+        n = accepted.shape[0]
+        if n:
+            temp_bank[offset:offset+n] = accepted[:, 1:5]
+    offset += n
 
 if options.metadata_file:
     outdoc = utils.load_filename(options.metadata_file,
