@@ -46,6 +46,66 @@ __version__ = pycbc.version.git_verbose_msg
 __date__    = pycbc.version.date
 __program__ = "pycbc_geom_aligned_bank"
 
+
+def _spin_caps(m1, m2, massRangeParams):
+    """Maximum |spin| for each component at masses (m1, m2), following the
+    NS/BH boundary rule used elsewhere in the bank code."""
+    mrp = massRangeParams
+    if mrp.nsbhFlag:
+        return mrp.maxBHSpinMag, mrp.maxNSSpinMag
+    if mrp.maxNSSpinMag == mrp.maxBHSpinMag:
+        return mrp.maxNSSpinMag, mrp.maxNSSpinMag
+    b = mrp.ns_bh_boundary_mass
+    cap1 = mrp.maxBHSpinMag if m1 >= b else mrp.maxNSSpinMag
+    cap2 = mrp.maxBHSpinMag if m2 >= b else mrp.maxNSSpinMag
+    return cap1, cap2
+
+
+def _boundary_param_sample(massRangeParams, n_mass=150):
+    """Physical (m1, m2, s1z, s2z) points covering the boundary of the mass
+    and spin region: a grid in the masses (with extra points straddling the
+    NS/BH boundary mass, where the spin cap jumps) crossed with the extreme
+    spins (+/- the per-component cap, and zero). Mapped into the xi
+    coordinates these trace out the extremes of the physical region, so their
+    convex hull encloses it. Random sampling alone misses these corners.
+    """
+    mrp = massRangeParams
+    b = mrp.ns_bh_boundary_mass
+
+    def axis(lo, hi):
+        pts = list(numpy.linspace(lo, hi, n_mass))
+        if b is not None and lo < b < hi:
+            pts += [b * (1 - 1e-9), b * (1 + 1e-9)]
+        return pts
+
+    M1, M2, S1, S2 = [], [], [], []
+    for m1 in axis(mrp.minMass1, mrp.maxMass1):
+        m2hi = min(m1, mrp.maxMass2, mrp.maxTotMass - m1)
+        m2lo = max(mrp.minMass2, mrp.minTotMass - m1)
+        if m2lo > m2hi:
+            continue
+        for m2 in axis(m2lo, m2hi):
+            mtot = m1 + m2
+            eta = m1 * m2 / (mtot * mtot)
+            if mrp.maxEta and eta > mrp.maxEta + 1e-12:
+                continue
+            if mrp.max_chirp_mass or mrp.min_chirp_mass:
+                mc = mtot * eta ** 0.6
+                if mrp.max_chirp_mass and mc > mrp.max_chirp_mass * (1 + 1e-12):
+                    continue
+                if mrp.min_chirp_mass and mc < mrp.min_chirp_mass * (1 - 1e-12):
+                    continue
+            cap1, cap2 = _spin_caps(m1, m2, mrp)
+            for s1 in (-cap1, 0.0, cap1):
+                for s2 in (-cap2, 0.0, cap2):
+                    M1.append(m1)
+                    M2.append(m2)
+                    S1.append(s1)
+                    S2.append(s2)
+    return (numpy.array(M1), numpy.array(M2),
+            numpy.array(S1), numpy.array(S2))
+
+
 # Read command line options
 _desc = __doc__[1:]
 parser = argparse.ArgumentParser(description=_desc,
@@ -64,7 +124,22 @@ parser.add_argument("-S", "--num-split-jobs", action="store", type=int,\
                     help="Number of parallel jobs to split the bank into. "+\
                          "OPTIONAL")
 parser.add_argument("-F", "--filter-points", action="store_true", default=False,
-                    help="Remove nearby points before generating the bank.")
+                    help="Before splitting the bank, discard lattice points "
+                    "that lie well outside the physical region, so the "
+                    "downstream (parallel) placement code does not waste time "
+                    "on points that would only be rejected. The test is "
+                    "conservative: points are dropped only when they are "
+                    "provably far from the physical region, so no placeable "
+                    "point is ever removed. OPTIONAL")
+parser.add_argument("--filter-points-threshold", action="store", type=float,
+                    default=2.0,
+                    help="Used with --filter-points. Discard a lattice point "
+                    "only if it lies further than this metric distance "
+                    "OUTSIDE the convex hull of the sampled physical region. "
+                    "The placement code rejects points beyond a metric "
+                    "distance of sqrt(2), so any value >= sqrt(2) keeps every "
+                    "placeable point; larger values are more conservative "
+                    "(keep more). OPTIONAL, default=2.0")
 parser.add_argument("--random-seed", action="store", type=int,\
                     default=None,
                     help="""Random seed to use whenever the numpy random
@@ -216,52 +291,56 @@ logging.info("Lattice contains %d points", len(v1s))
 # Now remove points that are too far from edges of parameter space
 
 if opts.filter_points:
-    logging.info("Removing lattice points too far from physical space.")
-    # Create a large set of points and map to xi_i to give a starting point when
-    # mapping from xi_i to masses and spins
-    # Use the EM constraint only if asked to do so
-    rMass1, rMass2, rSpin1z, rSpin2z = \
-          pycbc.tmpltbank.get_random_mass(2000000, massRangeParams)
+    logging.info("Removing lattice points that lie well outside the physical "
+                 "region.")
+    ndim = 3 if opts.threed_lattice else 2
 
-    rXis = pycbc.tmpltbank.get_cov_params(rMass1, rMass2, rSpin1z, rSpin2z, metricParams, metricParams.fUpper)
+    # Sample the physical region and map it into the xi coordinates to trace
+    # out the region the bank must cover. Random sampling alone under-populates
+    # the corners (extreme mass ratios and spins), so its convex hull would
+    # fall short there and could discard placeable points; we therefore add an
+    # explicit boundary sample so the hull reaches the true extremes, plus a
+    # random interior sample for robustness.
+    bM1, bM2, bS1, bS2 = _boundary_param_sample(massRangeParams)
+    rM1, rM2, rS1, rS2 = pycbc.tmpltbank.get_random_mass(500000,
+                                                         massRangeParams)
+    sM1 = numpy.concatenate([bM1, rM1])
+    sM2 = numpy.concatenate([bM2, rM2])
+    sS1 = numpy.concatenate([bS1, rS1])
+    sS2 = numpy.concatenate([bS2, rS2])
+    sampleXis = numpy.array(pycbc.tmpltbank.get_cov_params(
+        sM1, sM2, sS1, sS2, metricParams, metricParams.fUpper)).T[:, :ndim]
 
-    xis = (numpy.array(rXis)).T
-    f0 = opts.f0
-    order = opts.pn_order
-    maxmass1 = opts.max_mass1
-    maxmass2 = opts.max_mass2
-    minmass1 = opts.min_mass1
-    minmass2 = opts.min_mass2
-    maxNSspin = opts.max_ns_spin_mag
-    maxBHspin = opts.max_bh_spin_mag
+    # Build the convex hull of the sampled region and discard a lattice point
+    # only when its signed distance OUTSIDE that hull exceeds the threshold.
+    # Because the hull encloses the physical region, the distance outside it is
+    # a lower bound on the distance to the region, so a point that could be
+    # placed is never removed. (A nearest-neighbour-to-sample test was used
+    # previously, but it is not safe: near sparsely sampled parts of the region
+    # it overestimates the distance and can drop placeable points.)
+    logging.info("Building convex hull of the sampled physical region "
+                 "(%d points).", len(sampleXis))
+    hull = spatial.ConvexHull(sampleXis)
 
-    newV1s = []
-    newV2s = []
+    coords = [numpy.asarray(v1s), numpy.asarray(v2s)]
     if opts.threed_lattice:
-        newV3s = []
+        coords.append(numpy.asarray(v3s))
+    # Signed distance to the hull, computed facet by facet to bound memory:
+    # for each facet a.x + b <= 0 defines the interior (a is a unit normal),
+    # and the signed distance is the largest facet value (negative = inside).
+    signed = numpy.full(len(coords[0]), -numpy.inf)
+    for facet in hull.equations:
+        val = facet[ndim] + sum(facet[d] * coords[d] for d in range(ndim))
+        numpy.maximum(signed, val, out=signed)
 
-    # Use scipy's KDtree to quickly calculate Euclidean distances
-    logging.info("Setting up KDtree to compute distances.")
+    keep = signed < opts.filter_points_threshold
+    newV1s = coords[0][keep]
+    newV2s = coords[1][keep]
     if opts.threed_lattice:
-        tree = spatial.KDTree(xis[:,:3])
-        xi_points = list(zip(v1s,v2s,v3s))
-    else:
-        tree = spatial.KDTree(xis[:,:2])
-        xi_points = list(zip(v1s,v2s))
+        newV3s = coords[2][keep]
 
-    logging.info("Computing distances using KDtree.")
-    dists, pointargs = tree.query(xi_points)
-
-    logging.info("Removing far-away points.")
-
-    for i in range(len(v1s)):
-        if dists[i] < 2.:
-            newV1s.append(v1s[i])
-            newV2s.append(v2s[i])
-            if opts.threed_lattice:
-                newV3s.append(v3s[i])
-
-    logging.info("Filtered lattice contains %d points", len(newV1s))
+    logging.info("Filtered lattice contains %d of %d points",
+                 int(keep.sum()), len(keep))
 else:
     newV1s = v1s
     newV2s = v2s
