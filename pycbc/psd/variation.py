@@ -8,7 +8,8 @@ from scipy.interpolate import interp1d
 import pycbc.psd
 from pycbc.psd import interpolate
 from pycbc.types import TimeSeries
-from pycbc.filter import make_frequency_series
+from pycbc.filter import make_frequency_series, fir_zero_filter
+from pycbc.filter.resample import cached_firwin
 from pycbc.vetoes import power_chisq_bins
 
 
@@ -55,6 +56,52 @@ def create_full_filt(freqs, filt, plong, srate, psd_duration, low_freq, high_fre
         irfft(fwhiten * fweight), int(psd_duration / 2) * srate)
 
     return full_filt
+
+
+def build_band_kernels(fbins, sample_rate, kernel_duration=2.0):
+    """ Build a short, band-selective FIR kernel for each PSD-variation
+    frequency bin.
+
+    These kernels are the time-domain impulse response of a bandpass
+    selecting just one psdvar frequency bin. They depend only on the
+    (fixed) bin edges and sample rate, never on a template or on the
+    strain content, so they can be computed once per PSD update and
+    reused for every template and every noisy time window: applying one
+    of them to a matched-filter SNR time series is mathematically the
+    same operation as zeroing out `corr` outside that bin and inverse
+    Fourier transforming, but done as a short local convolution rather
+    than a transform over the full analysis segment.
+
+    `kernel_duration` trades off frequency resolution (how cleanly the
+    kernel isolates its bin from its neighbours) against the size, and
+    therefore cost, of the local correction it can later be used for.
+
+    Parameters
+    ----------
+    fbins : array of float
+        Edges of the psdvar frequency bins, in Hz (length nbins + 1).
+    sample_rate : float
+        Sample rate of the strain/SNR data the kernels will be applied to.
+    kernel_duration : float, optional
+        Duration, in seconds, of each FIR kernel.
+
+    Returns
+    -------
+    kernels : list of numpy.ndarray
+        One real-valued FIR kernel per bin (length nbins).
+    """
+    ntaps = int(kernel_duration * sample_rate)
+    # firwin needs an odd number of taps for a Type I (symmetric, integer
+    # group delay) linear-phase filter.
+    ntaps |= 1
+    kernels = []
+    for f_lo, f_hi in zip(fbins[:-1], fbins[1:]):
+        # cached_firwin is functools.lru_cache-wrapped, so its arguments
+        # must be hashable -- a tuple, not a list, for the band edges.
+        taps = cached_firwin(ntaps, (float(f_lo), float(f_hi)), pass_zero=False,
+                              window='hann', fs=sample_rate)
+        kernels.append(taps)
+    return kernels
 
 
 def mean_square(data, delta_t, srate, short_stride, stride, glitch_remover=True):
@@ -199,13 +246,14 @@ def calc_filt_psd_variation(strain, segment, short_segment, psd_long_segment,
                            seg_len=int(psd_duration * strain.sample_rate),
                            seg_stride=int(psd_stride * strain.sample_rate),
                            avg_method=psd_avg_method)
-        astrain = astrain.numpy()
         freqs = numpy.array(plong.sample_frequencies, dtype=fs_dtype)
         plong = plong.numpy()
 
         full_filt = create_full_filt(freqs, filt, plong, srate, psd_duration, low_freq, high_freq)
-        # Convolve the filter with long segment of data
-        wstrain = sig.fftconvolve(astrain, full_filt, mode='same')
+        # Convolve the filter with long segment of data. Use pycbc's own
+        # FFT-based FIR filtering (which internally chunks long inputs)
+        # rather than scipy, so this stays on pycbc's fft/scheme machinery.
+        wstrain = fir_zero_filter(full_filt, astrain).numpy()
         wstrain = wstrain[int(strain_crop * srate):-int(strain_crop * srate)]
         # compute the mean square of the chunk of data
         delta_t = len(wstrain) * strain.delta_t
@@ -346,11 +394,14 @@ class PSDVariation(object):
 
     def __init__(self, strain, frequency_dependent, fbins, threshold, segment,
                  short_segment, long_segment, psd_duration,
-                 psd_stride, avg_method, low_freq, high_freq, glitch_remover):
+                 psd_stride, avg_method, low_freq, high_freq, glitch_remover,
+                 kernel_duration=2.0):
         self.frequency_dependent = frequency_dependent
         self.fbins = fbins
         self.threshold = threshold
         self.store_in_events = not frequency_dependent and short_segment is not None
+        self.bad_windows = {}
+        self.bin_kernels = None
 
         if frequency_dependent:
             self.var_dict = get_psdvar_freq_dict(
@@ -359,6 +410,24 @@ class PSDVariation(object):
                 psd_stride=psd_stride, psd_avg_method=avg_method,
                 glitch_remover=glitch_remover)
             self.data = None
+
+            # Precompute, once, the small set of (second, bin) pairs that
+            # actually exceed the variation threshold. Both the SNR
+            # correction (matchedfilter.py) and the chisq correction
+            # (pycbc_inspiral) look this up by rounded GPS second instead
+            # of rescanning the whole var_dict per template/trigger.
+            self.bad_windows = {
+                int(round(t)): [(i, v) for i, v in enumerate(vals)
+                                if v > threshold]
+                for t, vals in self.var_dict.items()
+                if any(v > threshold for v in vals)
+            }
+
+            # Short, template-independent band-selective FIR kernels, one
+            # per frequency bin, used to build a local correction directly
+            # on the SNR time series instead of redoing a full-segment IFFT.
+            self.bin_kernels = build_band_kernels(
+                self.fbins, strain.sample_rate, kernel_duration=kernel_duration)
         else:
             self.var_dict = None
             self.data = calc_filt_psd_variation(
@@ -507,7 +576,8 @@ def live_calc_psd_variation(strain,
 
     # Convolve the data and the filter to produce the PSD variation timeseries,
     #  then trim the beginning and end of the data to prevent edge effects.
-    wstrain = sig.fftconvolve(astrain, full_filt, mode='same')
+    # Uses pycbc's own FFT-based FIR filtering rather than scipy.
+    wstrain = fir_zero_filter(full_filt, astrain).numpy()
     wstrain = wstrain[int(data_trim * sample_rate):-int(data_trim * sample_rate)]
 
     # Create a PSD variation array by taking the mean square of the PSD

@@ -275,38 +275,48 @@ def template_triggers(t_num):
               bank_chisq.values(template, stilde.psd, stilde, snrv, norm,
                                 idx+stilde.analyze.start)
 
-        # Apply frequency-dependent correction to corr for chisq if needed
+        # Apply frequency-dependent PSD-variation correction to corr for
+        # chisq if needed. Triggers are typically more than a second apart
+        # (post-clustering) so they can't usefully be batched by shared
+        # correction window. Instead, the common case -- a trigger's second
+        # has no frequency bin over threshold -- is batched through the
+        # ordinary (uncorrected) chisq path exactly as when the feature is
+        # disabled; only the (expected to be rare) triggers landing in a
+        # "bad" second pay the cost of an individually corrected corr
+        # vector and chisq call.
         if psd_var is not None and psd_var.frequency_dependent:
-            print("FD PSDVAR ENGAGED")
             chisq_combined = numpy.zeros(len(idx), dtype=float32)
             chisq_dof_combined = numpy.zeros(len(idx), dtype=int64)
-            
+
             segment_start = float(stilde._epoch)
-            
-            for trig_i, trig_idx in enumerate(idx):
-                print("TRIGGER", trig_idx)
-                t_trig = segment_start + ((trig_idx+stilde.analyze.start) * stilde.delta_t)
-                print(t_trig, segment_start)
-                
+            t_trig = segment_start + (idx + stilde.analyze.start) * stilde.delta_t
+            bad_seconds = [psd_var.bad_windows.get(int(round(t))) for t in t_trig]
+            bad_mask = numpy.array([b is not None for b in bad_seconds])
+
+            if (~bad_mask).any():
+                good_c, good_dof = power_chisq.values(
+                    corr, snrv[~bad_mask], norm, stilde.psd,
+                    (idx + stilde.analyze.start)[~bad_mask], template)
+                chisq_combined[~bad_mask] = good_c
+                chisq_dof_combined[~bad_mask] = good_dof
+
+            for trig_i in numpy.flatnonzero(bad_mask):
                 corr_v = corr.copy()
-                for t, v in psd_var.items():
-                    if float(t) - 0.5 <= t_trig < float(t) + 0.5:
-                        for (bin_i, v_val) in [(i, x) for i, x in enumerate(v) if x > psd_var.threshold]:
-                            print("PSD VARRING", t, bin_i, v_val)
-                            f_start_idx = int(psd_var.fbins[bin_i] / stilde.delta_f)
-                            f_end_idx = int(psd_var.fbins[bin_i+1] / stilde.delta_f)
-                            f_end_idx = min(f_end_idx, len(corr_v))
-                            if f_start_idx < len(corr_v):
-                                corr_v[f_start_idx:f_end_idx] /= numpy.sqrt(v_val)
+                for (bin_i, v_val) in bad_seconds[trig_i]:
+                    f_start_idx = int(psd_var.fbins[bin_i] / stilde.delta_f)
+                    f_end_idx = int(psd_var.fbins[bin_i+1] / stilde.delta_f)
+                    f_end_idx = min(f_end_idx, len(corr_v))
+                    if f_start_idx < len(corr_v):
+                        corr_v[f_start_idx:f_end_idx] /= numpy.sqrt(v_val)
 
                 trig_snrv = numpy.array([snrv[trig_i]])
-                trig_idx_arr = numpy.array([trig_idx + stilde.analyze.start])
-                
+                trig_idx_arr = numpy.array([idx[trig_i] + stilde.analyze.start])
+
                 c_val, c_dof = power_chisq.values(corr_v, trig_snrv, norm, stilde.psd,
                                                   trig_idx_arr, template)
                 chisq_combined[trig_i] = c_val[0]
                 chisq_dof_combined[trig_i] = c_dof[0]
-                
+
             out_vals['chisq'] = chisq_combined
             out_vals['chisq_dof'] = chisq_dof_combined
         else:
@@ -453,7 +463,7 @@ with ctx:
 
     # Note: `psd_var` inside pycbc_inspiral is stored as an object with `var_dict` and `fbins` if opt.psdvar_freq_dependent
     if psd_var is not None and psd_var.frequency_dependent:
-        matched_filter.set_psd_variation(psd_var.var_dict, psd_var.fbins, gwstrain.sample_rate, var_threshold=psd_var.threshold)
+        matched_filter.set_psd_variation(psd_var, gwstrain.sample_rate)
 
     bank_chisq = vetoes.SingleDetBankVeto(opt.bank_veto_bank_file,
                                           flen, delta_f, flow, complex64,

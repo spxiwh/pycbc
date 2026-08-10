@@ -32,7 +32,7 @@ import numpy
 
 from pycbc.types import TimeSeries, FrequencySeries, zeros, Array
 from pycbc.types import complex_same_precision_as, real_same_precision_as
-from pycbc.fft import fft, ifft, IFFT
+from pycbc.fft import fft, ifft, FFT, IFFT
 import pycbc.scheme
 from pycbc import events
 from pycbc.events import ranking
@@ -240,53 +240,133 @@ class MatchedFilterControl(object):
         else:
             raise ValueError("Invalid downsample factor")
 
-    def set_psd_variation(self, var_dict, fbins, sample_rate, var_threshold=0.1):
-        """ Set the frequency dependent PSD variation info to apply during IFFT SNR calculation.
+    def set_psd_variation(self, psd_var, sample_rate):
+        """ Set the frequency dependent PSD variation info to apply during
+        IFFT SNR calculation.
+
+        Parameters
+        ----------
+        psd_var : pycbc.psd.variation.PSDVariation
+            A frequency-dependent PSDVariation instance. Carries a
+            precomputed table (`bad_windows`) of which one-second windows
+            have any frequency bin exceeding the variation threshold, and a
+            set of short, template-independent band-selective FIR kernels
+            (`bin_kernels`) used to build the correction locally rather than
+            via a full-segment IFFT per noisy second.
+        sample_rate : float
+            The sample rate of the strain/SNR data.
         """
-        self.var_dict = var_dict
-        self.fbins = fbins
+        self.psd_var = psd_var
         self.psd_var_sample_rate = sample_rate
-        self.var_threshold = var_threshold
+
+        if not psd_var.bad_windows:
+            return
+
+        # The local correction window length is fixed for the lifetime of
+        # this object (it depends only on kernel length and sample rate,
+        # neither of which change), so everything needed to apply it --
+        # buffers and FFT/IFFT plans -- can be built exactly once here and
+        # reused for every bad-window correction, for every template, for
+        # the rest of the run. No per-event allocation or FFT (re)planning.
+        kernel_len = len(psd_var.bin_kernels[0])
+        reach = kernel_len // 2
+        half_sec_samples = int(round(0.5 / self.delta_t))
+        window_len = 2 * (half_sec_samples + reach)
+
+        self._psdvar_reach = reach
+        self._psdvar_half_sec_samples = half_sec_samples
+        self._psdvar_window_len = window_len
+
+        # Precompute the FFT of each (reversed, zero-padded, circularly
+        # shifted) per-bin kernel once. Per correction event we only need
+        # a weighted sum of these precomputed spectra -- FFT, along with
+        # the padding/shift, is linear in the kernel values -- instead of
+        # transforming a kernel from scratch every time. This is a one-off
+        # setup cost (at most nbins calls total), so plain numpy is used
+        # rather than wiring up pycbc's FFT for a handful of calls.
+        bin_kernel_ffts = []
+        for h in psd_var.bin_kernels:
+            r = numpy.zeros(window_len, dtype=self.dtype)
+            r[:kernel_len] = h[::-1]
+            r = numpy.roll(r, window_len - kernel_len + 1)
+            bin_kernel_ffts.append(numpy.fft.fft(r))
+        self._psdvar_bin_kernel_ffts = bin_kernel_ffts
+
+        # Fixed-size complex-to-complex FFT/IFFT plans, reused for every
+        # correction event. snr_mem is natively complex, so this applies
+        # the correction in one pass instead of filtering the real and
+        # imaginary parts separately.
+        self._psdvar_td_in = zeros(window_len, dtype=self.dtype)
+        self._psdvar_fd_out = zeros(window_len, dtype=self.dtype)
+        self._psdvar_fft = FFT(self._psdvar_td_in, self._psdvar_fd_out)
+
+        self._psdvar_fd_in = zeros(window_len, dtype=self.dtype)
+        self._psdvar_td_out = zeros(window_len, dtype=self.dtype)
+        self._psdvar_ifft = IFFT(self._psdvar_fd_in, self._psdvar_td_out)
 
     def _apply_frequency_dependent_psd_variation(self, epoch):
-        if not hasattr(self, 'var_dict') or self.var_dict is None or epoch is None:
+        psd_var = getattr(self, 'psd_var', None)
+        if psd_var is None or not psd_var.bad_windows or epoch is None:
             return
 
         segment_start = float(epoch)
-        segment_end = segment_start + (len(self.snr_mem) * self.delta_t)
-        
-        # Find times within this segment that are noisy
-        noise_times = {
-            t: [(i, x) for i, x in enumerate(v) if x > self.var_threshold]
-            for t, v in self.var_dict.items()
-            if any(x > self.var_threshold for x in v) and segment_start <= float(t) <= segment_end
-        }
-        
-        if noise_times:
-            import numpy
-            from pycbc.types import TimeSeries
-            import pycbc.fft
-            
-            corr_v_mem = self.corr_mem.copy()
-            q = zeros(len(self.snr_mem), dtype=self.dtype)
-            patch_ifft = pycbc.fft.IFFT(corr_v_mem, q)
-            
-            for t in noise_times:
-                corr_v_mem[:] = self.corr_mem[:]
-                for (i, v_val) in noise_times[t]:
-                    f_start_idx = int(self.fbins[i] / self.delta_f)
-                    f_end_idx = int(self.fbins[i+1] / self.delta_f)
-                    f_end_idx = min(f_end_idx, len(corr_v_mem))
-                    if f_start_idx < len(corr_v_mem):
-                        corr_v_mem[f_start_idx:f_end_idx] /= numpy.sqrt(v_val)
-                
-                patch_ifft.execute()
-                
-                t_idx_start = max(int((float(t) - 0.5 - segment_start) / self.delta_t), 0)
-                t_idx_end = min(int((float(t) + 0.5 - segment_start) / self.delta_t), len(self.snr_mem))
-                
-                if t_idx_start < t_idx_end:
-                    self.snr_mem[t_idx_start:t_idx_end] = q[t_idx_start:t_idx_end]
+        seg_len = len(self.snr_mem)
+        first_sec = int(numpy.floor(segment_start))
+        last_sec = int(numpy.ceil(segment_start + seg_len * self.delta_t))
+
+        reach = self._psdvar_reach
+        half_sec_samples = self._psdvar_half_sec_samples
+        window_len = self._psdvar_window_len
+        bin_kernel_ffts = self._psdvar_bin_kernel_ffts
+
+        for t in range(first_sec, last_sec + 1):
+            bad_bins = psd_var.bad_windows.get(t)
+            if not bad_bins:
+                continue
+
+            # Combine every bin that is bad *at this second* into a single
+            # local correction: a weighted sum of the precomputed per-bin
+            # kernel spectra (equivalent to summing the kernels themselves
+            # first, since FFT is linear).
+            combined_fft = None
+            for bin_i, v_val in bad_bins:
+                weight = 1.0 / numpy.sqrt(v_val) - 1.0
+                contribution = weight * bin_kernel_ffts[bin_i]
+                combined_fft = contribution if combined_fft is None \
+                    else combined_fft + contribution
+
+            center = int(round((t - segment_start) / self.delta_t))
+            lo = center - window_len // 2
+            hi = lo + window_len
+            if lo < 0 or hi > seg_len:
+                # Fixed window runs off the edge of the analyzed buffer --
+                # only possible within a couple of seconds of the segment
+                # boundary, well inside the padded region that isn't
+                # triggered on anyway. Skip this event.
+                continue
+
+            self._psdvar_td_in[:] = self.snr_mem[lo:hi]
+            self._psdvar_fft.execute()
+
+            product = numpy.conj(combined_fft) * self._psdvar_fd_out.numpy()
+            self._psdvar_fd_in[:] = Array(product, dtype=self.dtype)
+            self._psdvar_ifft.execute()
+
+            # The reversed/shifted kernel construction leaves a constant
+            # group delay of `reach` samples in the raw IFFT output;
+            # un-rolling it lines the valid (non-wrapped) region up with
+            # the requested output window.
+            correction = numpy.roll(
+                self._psdvar_td_out.numpy() / window_len, -reach)
+
+            out_lo = center - half_sec_samples
+            out_hi = center + half_sec_samples
+            local_lo = out_lo - lo
+            local_hi = out_hi - lo
+
+            updated = self._psdvar_td_in.numpy()[local_lo:local_hi] + \
+                correction[local_lo:local_hi]
+            self.snr_mem[out_lo:out_hi] = Array(updated, dtype=self.dtype)
 
     def full_matched_filter_and_cluster_symm(self, segnum, template_norm, window, epoch=None):
         """ Returns the complex snr timeseries, normalization of the complex snr,
