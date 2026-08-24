@@ -192,7 +192,9 @@ logging.info("Calculating covariance matrix")
 vals = tmpltbank.estimate_mass_range(
     1000000, massRangeParams, metricParams, refFreq, covary=False)
 cov = numpy.cov(vals)
-evalsCV, evecsCV = numpy.linalg.eig(cov)
+evalsCV, evecsCV = numpy.linalg.eigh(cov)
+# eigh gives ascending eigenvalues; reverse to descending (dominant direction first)
+evalsCV, evecsCV = evalsCV[::-1], evecsCV[:, ::-1]
 evecsCVdict = {}
 evecsCVdict[refFreq] = evecsCV
 metricParams.evecsCV = evecsCVdict

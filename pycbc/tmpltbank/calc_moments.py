@@ -127,8 +127,10 @@ def determine_eigen_directions(metricParams, preserveMoments=False,
         metric[item] = gs
         unmax_metric[item] = unmax_metric_curr
 
-        # And the eigenvalues
-        evals[item], evecs[item] = numpy.linalg.eig(gs)
+        # gs is symmetric: use eigh (eig can return complex128 for ill-conditioned metrics) and reverse to descending eigenvalue order.
+        eigvals, eigvecs = numpy.linalg.eigh(gs)
+        evals[item] = eigvals[::-1]
+        evecs[item] = eigvecs[:, ::-1]
 
         # Numerical error can lead to small negative eigenvalues.
         for i in range(len(evals[item])):
