@@ -460,7 +460,16 @@ class PartitionedTmpltbank(object):
             A 2D array where idx 0 holds the upper frequency cutoff and idx 1
             holds the coordinates in the [not covaried] mu parameter space for
             each value of the upper frequency cutoff.
+
+        chi_coords may instead be a (n_chi, N) array, with mass1..spin2z
+        equal-length arrays, to add N points together in bulk.
         """
+        chi_coords = numpy.asarray(chi_coords)
+        if chi_coords.ndim > 1:
+            self._add_points_by_chi_coords(chi_coords, mass1, mass2, spin1z,
+                                           spin2z)
+            return
+
         chi1_bin, chi2_bin = self.find_point_bin(chi_coords)
         self.bank[chi1_bin][chi2_bin].append(copy.deepcopy(chi_coords))
         curr_bank = self.massbank[chi1_bin][chi2_bin]
@@ -497,6 +506,73 @@ class PartitionedTmpltbank(object):
             if mus is not None:
                 curr_bank['mus'] = numpy.array([mus[:,:]])
 
+    def _add_points_by_chi_coords(self, chi_coords, mass1s, mass2s, spin1zs,
+                                  spin2zs):
+        """Add many points at once given their chi coordinates.
+
+        chi_coords has shape (n_chi, N). Points are grouped by bin with a
+        single sort, so each bin's arrays are written once as a contiguous
+        slice rather than grown one element at a time with numpy.append (which
+        is quadratic in bin occupancy). Any templates already in a bin are
+        appended to.
+        """
+        n_points = chi_coords.shape[1]
+        if not n_points:
+            return
+        chi1_bins = ((chi_coords[0] - self.chi1_min)
+                     // self.bin_spacing).astype(int)
+        chi2_bins = ((chi_coords[1] - self.chi2_min)
+                     // self.bin_spacing).astype(int)
+        # Sort so points sharing a bin are contiguous.
+        order = numpy.lexsort((chi2_bins, chi1_bins))
+        c1_sorted = chi1_bins[order]
+        c2_sorted = chi2_bins[order]
+        chi_sorted = chi_coords.T[order]
+        m1_sorted = numpy.asarray(mass1s)[order]
+        m2_sorted = numpy.asarray(mass2s)[order]
+        s1_sorted = numpy.asarray(spin1zs)[order]
+        s2_sorted = numpy.asarray(spin2zs)[order]
+        # Start index of each contiguous bin group.
+        change = numpy.ones(n_points, dtype=bool)
+        change[1:] = ((c1_sorted[1:] != c1_sorted[:-1]) |
+                      (c2_sorted[1:] != c2_sorted[:-1]))
+        starts = numpy.flatnonzero(change)
+        ends = numpy.empty_like(starts)
+        ends[:-1] = starts[1:]
+        ends[-1] = n_points
+        # Make sure every occupied bin (and its neighbours) exists.
+        for s in starts:
+            self.check_bin_existence(int(c1_sorted[s]), int(c2_sorted[s]))
+        # Store each bin's templates, appending to anything already present.
+        for s, e in zip(starts, ends):
+            c1 = int(c1_sorted[s])
+            c2 = int(c2_sorted[s])
+            new_chi = chi_sorted[s:e]
+            curr = self.bank[c1][c2]
+            if isinstance(curr, list):
+                if curr:
+                    self.bank[c1][c2] = numpy.vstack(
+                        [numpy.asarray(curr), new_chi])
+                else:
+                    self.bank[c1][c2] = new_chi
+            else:
+                self.bank[c1][c2] = numpy.vstack([curr, new_chi])
+            curr_bank = self.massbank[c1][c2]
+            if curr_bank['mass1s'].size:
+                curr_bank['mass1s'] = numpy.concatenate(
+                    [curr_bank['mass1s'], m1_sorted[s:e]])
+                curr_bank['mass2s'] = numpy.concatenate(
+                    [curr_bank['mass2s'], m2_sorted[s:e]])
+                curr_bank['spin1s'] = numpy.concatenate(
+                    [curr_bank['spin1s'], s1_sorted[s:e]])
+                curr_bank['spin2s'] = numpy.concatenate(
+                    [curr_bank['spin2s'], s2_sorted[s:e]])
+            else:
+                curr_bank['mass1s'] = m1_sorted[s:e]
+                curr_bank['mass2s'] = m2_sorted[s:e]
+                curr_bank['spin1s'] = s1_sorted[s:e]
+                curr_bank['spin2s'] = s2_sorted[s:e]
+
     def add_point_by_masses(self, mass1, mass2, spin1z, spin2z,
                             vary_fupper=False):
         """
@@ -519,7 +595,52 @@ class PartitionedTmpltbank(object):
             Spin of the heavier body
         spin2z : float
             Spin of the lighter body
+
+        The four mass/spin arguments may equally be equal-length arrays, in
+        which case all points are added together (much faster than one call
+        per template).
         """
+        # Array inputs: add every point in one vectorized pass.
+        if numpy.ndim(mass1):
+            mass1 = numpy.asarray(mass1)
+            mass2 = numpy.asarray(mass2)
+            spin1z = numpy.asarray(spin1z)
+            spin2z = numpy.asarray(spin2z)
+            if not len(mass1):
+                return
+            if vary_fupper:
+                # vary-fupper needs per-point mu/fupper products; add singly.
+                for idx in range(len(mass1)):
+                    self.add_point_by_masses(mass1[idx], mass2[idx],
+                                             spin1z[idx], spin2z[idx],
+                                             vary_fupper=True)
+                return
+            if numpy.any(mass2 > mass1) and not self.spin_warning_given:
+                logger.warning("Adding templates where mass2 > mass1. The "
+                               "convention is mass1 > mass2. This message "
+                               "will not be repeated.")
+                self.spin_warning_given = True
+            if numpy.any(self.mass_range_params.is_outside_range(
+                    mass1, mass2, spin1z, spin2z)):
+                raise ValueError("One or more templates are not consistent "
+                                 "with the provided command-line restrictions "
+                                 "on masses and spins.")
+            # Vectorized metric transform, chunked to bound peak memory.
+            n_points = len(mass1)
+            chunk = 2000000
+            chi_coords = None
+            for start in range(0, n_points, chunk):
+                end = min(start + chunk, n_points)
+                cc = numpy.array(coord_utils.get_cov_params(
+                    mass1[start:end], mass2[start:end], spin1z[start:end],
+                    spin2z[start:end], self.metric_params, self.ref_freq))
+                if chi_coords is None:
+                    chi_coords = numpy.empty((cc.shape[0], n_points))
+                chi_coords[:, start:end] = cc
+            self.add_point_by_chi_coords(chi_coords, mass1, mass2, spin1z,
+                                         spin2z)
+            return
+
         # Test that masses are the expected way around (ie. mass1 > mass2)
         if mass2 > mass1:
             if not self.spin_warning_given:
@@ -585,9 +706,12 @@ class PartitionedTmpltbank(object):
             If given also include the additional information needed to compute
             distances with a varying upper frequency cutoff.
         """
-        for sngl in sngl_table:
-            self.add_point_by_masses(sngl.mass1, sngl.mass2, sngl.spin1z,
-                                     sngl.spin2z, vary_fupper=vary_fupper)
+        mass1s = numpy.array([sngl.mass1 for sngl in sngl_table])
+        mass2s = numpy.array([sngl.mass2 for sngl in sngl_table])
+        spin1zs = numpy.array([sngl.spin1z for sngl in sngl_table])
+        spin2zs = numpy.array([sngl.spin2z for sngl in sngl_table])
+        self.add_point_by_masses(mass1s, mass2s, spin1zs, spin2zs,
+                                 vary_fupper=vary_fupper)
 
     def add_tmpltbank_from_hdf_file(self, hdf_fp, vary_fupper=False):
         """
@@ -607,9 +731,8 @@ class PartitionedTmpltbank(object):
         mass2s = hdf_fp['mass2'][:]
         spin1zs = hdf_fp['spin1z'][:]
         spin2zs = hdf_fp['spin2z'][:]
-        for idx in range(len(mass1s)):
-            self.add_point_by_masses(mass1s[idx], mass2s[idx], spin1zs[idx],
-                                     spin2zs[idx], vary_fupper=vary_fupper)
+        self.add_point_by_masses(mass1s, mass2s, spin1zs, spin2zs,
+                                 vary_fupper=vary_fupper)
 
     def output_all_points(self):
         """Return all points in the bank.

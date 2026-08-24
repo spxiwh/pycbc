@@ -1006,64 +1006,62 @@ class massRangeParameters(object):
     def is_outside_range(self, mass1, mass2, spin1z, spin2z):
         """
         Test if a given location in mass1, mass2, spin1z, spin2z is within the
-        range of parameters allowed by the massParams object.
+        range of parameters allowed by the massParams object. Inputs may be
+        scalars or equal-shaped arrays; a scalar returns 0/1, an array returns
+        a boolean mask (True where the point is outside the range).
         """
-        # Mass1 test
-        if mass1 * 1.001 < self.minMass1:
-            return 1
-        if mass1 > self.maxMass1 * 1.001:
-            return 1
-        # Mass2 test
-        if mass2 * 1.001 < self.minMass2:
-            return 1
-        if mass2 > self.maxMass2 * 1.001:
-            return 1
+        mass1 = numpy.asarray(mass1)
+        mass2 = numpy.asarray(mass2)
+        spin1z = numpy.asarray(spin1z)
+        spin2z = numpy.asarray(spin2z)
+
+        # Mass tests
+        outside = mass1 * 1.001 < self.minMass1
+        outside = outside | (mass1 > self.maxMass1 * 1.001)
+        outside = outside | (mass2 * 1.001 < self.minMass2)
+        outside = outside | (mass2 > self.maxMass2 * 1.001)
+
         # Spin1 test
         if self.nsbhFlag:
-            if (abs(spin1z) > self.maxBHSpinMag * 1.001):
-                return 1
+            outside = outside | (numpy.abs(spin1z) > self.maxBHSpinMag * 1.001)
         else:
-            spin1zM = abs(spin1z)
-            if not( (mass1 * 1.001 > self.ns_bh_boundary_mass \
-                     and spin1zM <= self.maxBHSpinMag * 1.001) \
-                 or (mass1 < self.ns_bh_boundary_mass * 1.001 \
-                     and spin1zM <= self.maxNSSpinMag * 1.001)):
-                return 1
+            spin1zM = numpy.abs(spin1z)
+            ok = ((mass1 * 1.001 > self.ns_bh_boundary_mass)
+                  & (spin1zM <= self.maxBHSpinMag * 1.001)) \
+                | ((mass1 < self.ns_bh_boundary_mass * 1.001)
+                   & (spin1zM <= self.maxNSSpinMag * 1.001))
+            outside = outside | (~ok)
         # Spin2 test
         if self.nsbhFlag:
-            if (abs(spin2z) > self.maxNSSpinMag * 1.001):
-                return 1
+            outside = outside | (numpy.abs(spin2z) > self.maxNSSpinMag * 1.001)
         else:
-            spin2zM = abs(spin2z)
-            if not( (mass2 * 1.001 > self.ns_bh_boundary_mass \
-                     and spin2zM <= self.maxBHSpinMag * 1.001) \
-                 or (mass2 < self.ns_bh_boundary_mass * 1.001 and \
-                     spin2zM <= self.maxNSSpinMag * 1.001)):
-                return 1
+            spin2zM = numpy.abs(spin2z)
+            ok = ((mass2 * 1.001 > self.ns_bh_boundary_mass)
+                  & (spin2zM <= self.maxBHSpinMag * 1.001)) \
+                | ((mass2 < self.ns_bh_boundary_mass * 1.001)
+                   & (spin2zM <= self.maxNSSpinMag * 1.001))
+            outside = outside | (~ok)
+
         # Total mass test
         mTot = mass1 + mass2
-        if mTot > self.maxTotMass * 1.001:
-            return 1
-        if mTot * 1.001 < self.minTotMass:
-            return 1
+        outside = outside | (mTot > self.maxTotMass * 1.001)
+        outside = outside | (mTot * 1.001 < self.minTotMass)
 
         # Eta test
         eta = mass1 * mass2 / (mTot * mTot)
-        if eta > self.maxEta * 1.001:
-            return 1
-        if eta * 1.001 < self.minEta:
-            return 1
+        outside = outside | (eta > self.maxEta * 1.001)
+        outside = outside | (eta * 1.001 < self.minEta)
 
         # Chirp mass test
         chirp_mass = mTot * eta**(3./5.)
-        if self.min_chirp_mass is not None \
-                and chirp_mass * 1.001 < self.min_chirp_mass:
-            return 1
-        if self.max_chirp_mass is not None \
-                and chirp_mass > self.max_chirp_mass * 1.001:
-            return 1
+        if self.min_chirp_mass is not None:
+            outside = outside | (chirp_mass * 1.001 < self.min_chirp_mass)
+        if self.max_chirp_mass is not None:
+            outside = outside | (chirp_mass > self.max_chirp_mass * 1.001)
 
-        return 0
+        if outside.ndim == 0:
+            return int(outside)
+        return outside
 
 class ethincaParameters(object):
     """
