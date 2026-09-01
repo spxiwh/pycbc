@@ -92,20 +92,19 @@ class PartitionedTmpltbank(object):
         chi2_min = chi2_min - 0.1*chi2_diff
         chi2_max = chi2_max + 0.1*chi2_diff
 
-        massbank = {}
-        bank = {}
-        # Also add a little bit here
-        for i in range(-2, int((chi1_max - chi1_min) // bin_spacing + 2)):
-            bank[i] = {}
-            massbank[i] = {}
-            for j in range(-2, int((chi2_max - chi2_min) // bin_spacing + 2)):
-                bank[i][j] = []
-                massbank[i][j] = {}
-                massbank[i][j]['mass1s'] = numpy.array([])
-
-        self.massbank = massbank
-        self.bank = bank
-        # Record minimum and maximum bins
+        # Bins are created lazily, as points are added, by _ensure_bin, and
+        # only bins that actually receive templates are stored. The full
+        # (chi1, chi2) bounding box can be hundreds of millions of bins for a
+        # wide/stiff metric (e.g. Einstein Telescope spans ~5.9e4 in chi1 ->
+        # O(4.5e8) bins), the overwhelming majority of which stay empty.
+        # Pre-allocating that grid is prohibitively expensive in both memory
+        # (tens of GB of empty dicts and arrays) and time, so we keep only the
+        # occupied bins in a sparse nested dict and treat any missing bin as
+        # empty in the matching loops.
+        self.massbank = {}
+        self.bank = {}
+        # Record the parameter-space extent. The min/max bin indices are kept
+        # for reference only; bin existence is handled lazily by _ensure_bin.
         self.min_chi1_bin = -2
         self.min_chi2_bin = -2
         self.max_chi1_bin = int((chi1_max - chi1_min) // bin_spacing + 1)
@@ -195,44 +194,41 @@ class PartitionedTmpltbank(object):
         chi2_bin : int
             Index of the chi_2 bin.
         """
-        # Identify bin
+        # Identify bin. This is a pure lookup: it does not create any bins.
+        # Empty bins are never stored, so the matching loops that call this must
+        # tolerate a missing (chi1_bin, chi2_bin) and treat it as empty.
         chi1_bin = int((chi_coords[0] - self.chi1_min) // self.bin_spacing)
         chi2_bin = int((chi_coords[1] - self.chi2_min) // self.bin_spacing)
-        self.check_bin_existence(chi1_bin, chi2_bin)
         return chi1_bin, chi2_bin
 
 
-    def check_bin_existence(self, chi1_bin, chi2_bin):
+    def _ensure_bin(self, chi1_bin, chi2_bin):
         """
-        Given indices for bins in chi1 and chi2 space check that the bin
-        exists in the object. If not add it. Also check for the existence of
-        all bins within +/- self.bin_range_check and add if not present.
+        Ensure that the single (chi1_bin, chi2_bin) bin exists, creating it
+        empty if not.
+
+        Only bins that actually receive templates are ever created; empty bins
+        are not stored and the distance/matching loops treat a missing bin as
+        empty. This keeps memory proportional to the number of *occupied* bins.
+        Storing the full parameter-space grid, or even every occupied bin's
+        neighbourhood, would be hundreds of millions of bins (tens of GB of
+        empty dicts/arrays) for a wide metric such as Einstein Telescope.
 
         Parameters
         -----------
         chi1_bin : int
-            The index of the chi1_bin to check
+            The index of the chi1_bin to create.
         chi2_bin : int
-            The index of the chi2_bin to check
+            The index of the chi2_bin to create.
         """
-        bin_range_check = self.bin_range_check
-        # Check if this bin actually exists. If not add it
-        if ( (chi1_bin < self.min_chi1_bin+bin_range_check) or
-             (chi1_bin > self.max_chi1_bin-bin_range_check) or
-             (chi2_bin < self.min_chi2_bin+bin_range_check) or
-             (chi2_bin > self.max_chi2_bin-bin_range_check) ):
-            for temp_chi1 in range(chi1_bin-bin_range_check,
-                                                   chi1_bin+bin_range_check+1):
-                if temp_chi1 not in self.massbank:
-                    self.massbank[temp_chi1] = {}
-                    self.bank[temp_chi1] = {}
-                for temp_chi2 in range(chi2_bin-bin_range_check,
-                                                   chi2_bin+bin_range_check+1):
-                    if temp_chi2 not in self.massbank[temp_chi1]:
-                        self.massbank[temp_chi1][temp_chi2] = {}
-                        self.massbank[temp_chi1][temp_chi2]['mass1s'] =\
-                                                                numpy.array([])
-                        self.bank[temp_chi1][temp_chi2] = []
+        inner = self.bank.get(chi1_bin)
+        if inner is None:
+            self.bank[chi1_bin] = {}
+            self.massbank[chi1_bin] = {}
+            inner = self.bank[chi1_bin]
+        if chi2_bin not in inner:
+            inner[chi2_bin] = []
+            self.massbank[chi1_bin][chi2_bin] = {'mass1s': numpy.array([])}
 
     def calc_point_distance(self, chi_coords):
         """
@@ -258,8 +254,13 @@ class PartitionedTmpltbank(object):
         for chi1_bin_offset, chi2_bin_offset in self.bin_loop_order:
             curr_chi1_bin = chi1_bin + chi1_bin_offset
             curr_chi2_bin = chi2_bin + chi2_bin_offset
-            for idx, bank_chis in \
-                            enumerate(self.bank[curr_chi1_bin][curr_chi2_bin]):
+            inner = self.bank.get(curr_chi1_bin)
+            if inner is None:
+                continue
+            bank_bin = inner.get(curr_chi2_bin)
+            if bank_bin is None:
+                continue
+            for idx, bank_chis in enumerate(bank_bin):
                 dist = coord_utils.calc_point_dist(chi_coords, bank_chis)
                 if dist < min_dist:
                     min_dist = dist
@@ -290,7 +291,13 @@ class PartitionedTmpltbank(object):
         for chi1_bin_offset, chi2_bin_offset in self.bin_loop_order:
             curr_chi1_bin = chi1_bin + chi1_bin_offset
             curr_chi2_bin = chi2_bin + chi2_bin_offset
-            for bank_chis in self.bank[curr_chi1_bin][curr_chi2_bin]:
+            inner = self.bank.get(curr_chi1_bin)
+            if inner is None:
+                continue
+            bank_bin = inner.get(curr_chi2_bin)
+            if bank_bin is None:
+                continue
+            for bank_chis in bank_bin:
                 dist = coord_utils.calc_point_dist(chi_coords, bank_chis)
                 if dist < distance_threshold:
                     return True
@@ -330,9 +337,12 @@ class PartitionedTmpltbank(object):
         for chi1_bin_offset, chi2_bin_offset in self.bin_loop_order:
             curr_chi1_bin = chi1_bin + chi1_bin_offset
             curr_chi2_bin = chi2_bin + chi2_bin_offset
-            # No points = Next iteration
-            curr_bank = self.massbank[curr_chi1_bin][curr_chi2_bin]
-            if not curr_bank['mass1s'].size:
+            # Missing or empty bin = Next iteration
+            inner = self.massbank.get(curr_chi1_bin)
+            if inner is None:
+                continue
+            curr_bank = inner.get(curr_chi2_bin)
+            if curr_bank is None or not curr_bank['mass1s'].size:
                 continue
 
             # *NOT* the same of .min and .max
@@ -397,9 +407,12 @@ class PartitionedTmpltbank(object):
         for chi1_bin_offset, chi2_bin_offset in self.bin_loop_order:
             curr_chi1_bin = chi1_bin + chi1_bin_offset
             curr_chi2_bin = chi2_bin + chi2_bin_offset
-            # No points = Next iteration
-            curr_bank = self.massbank[curr_chi1_bin][curr_chi2_bin]
-            if not curr_bank['mass1s'].size:
+            # Missing or empty bin = Next iteration
+            inner = self.massbank.get(curr_chi1_bin)
+            if inner is None:
+                continue
+            curr_bank = inner.get(curr_chi2_bin)
+            if curr_bank is None or not curr_bank['mass1s'].size:
                 continue
 
             # *NOT* the same of .min and .max
@@ -471,6 +484,7 @@ class PartitionedTmpltbank(object):
             return
 
         chi1_bin, chi2_bin = self.find_point_bin(chi_coords)
+        self._ensure_bin(chi1_bin, chi2_bin)
         self.bank[chi1_bin][chi2_bin].append(copy.deepcopy(chi_coords))
         curr_bank = self.massbank[chi1_bin][chi2_bin]
 
@@ -540,9 +554,10 @@ class PartitionedTmpltbank(object):
         ends = numpy.empty_like(starts)
         ends[:-1] = starts[1:]
         ends[-1] = n_points
-        # Make sure every occupied bin (and its neighbours) exists.
+        # Make sure every occupied bin exists (empty neighbours are not
+        # stored; the matching loops treat a missing bin as empty).
         for s in starts:
-            self.check_bin_existence(int(c1_sorted[s]), int(c2_sorted[s]))
+            self._ensure_bin(int(c1_sorted[s]), int(c2_sorted[s]))
         # Store each bin's templates, appending to anything already present.
         for s, e in zip(starts, ends):
             c1 = int(c1_sorted[s])
@@ -625,20 +640,34 @@ class PartitionedTmpltbank(object):
                 raise ValueError("One or more templates are not consistent "
                                  "with the provided command-line restrictions "
                                  "on masses and spins.")
-            # Vectorized metric transform, chunked to bound peak memory.
+            # Transform to chi coordinates and insert in chunks so that peak
+            # memory stays bounded regardless of the bank size. Two chunk sizes
+            # are used:
+            #   - transform_chunk bounds the (transient) cost of get_cov_params,
+            #   - insert_chunk bounds the sort in _add_points_by_chi_coords,
+            #     which needs ~2x the coordinate storage of the chunk at once.
+            # Doing the whole bank in one pass would need tens of GB of transient
+            # storage for O(1e8) templates (8 chi coordinates x N, held twice
+            # during the sort). Bins straddling insert chunks are concatenated a
+            # handful of times, which is still far cheaper than the per-point
+            # numpy.append this bulk path replaced.
             n_points = len(mass1)
-            chunk = 2000000
-            chi_coords = None
-            for start in range(0, n_points, chunk):
-                end = min(start + chunk, n_points)
-                cc = numpy.array(coord_utils.get_cov_params(
-                    mass1[start:end], mass2[start:end], spin1z[start:end],
-                    spin2z[start:end], self.metric_params, self.ref_freq))
-                if chi_coords is None:
-                    chi_coords = numpy.empty((cc.shape[0], n_points))
-                chi_coords[:, start:end] = cc
-            self.add_point_by_chi_coords(chi_coords, mass1, mass2, spin1z,
-                                         spin2z)
+            transform_chunk = 2000000
+            insert_chunk = 25000000
+            for i_start in range(0, n_points, insert_chunk):
+                i_end = min(i_start + insert_chunk, n_points)
+                chi_coords = None
+                for start in range(i_start, i_end, transform_chunk):
+                    end = min(start + transform_chunk, i_end)
+                    cc = numpy.asarray(coord_utils.get_cov_params(
+                        mass1[start:end], mass2[start:end], spin1z[start:end],
+                        spin2z[start:end], self.metric_params, self.ref_freq))
+                    if chi_coords is None:
+                        chi_coords = numpy.empty((cc.shape[0], i_end - i_start))
+                    chi_coords[:, start - i_start:end - i_start] = cc
+                self.add_point_by_chi_coords(
+                    chi_coords, mass1[i_start:i_end], mass2[i_start:i_end],
+                    spin1z[i_start:i_end], spin2z[i_start:i_end])
             return
 
         # Test that masses are the expected way around (ie. mass1 > mass2)
