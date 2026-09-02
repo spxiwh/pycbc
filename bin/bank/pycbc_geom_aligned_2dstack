@@ -78,6 +78,20 @@ parser.add_argument("--split-bank-num", action="store", type=int,
 parser.add_argument("--stack-distance", action="store", type=float,\
                   default=0.2, help="Minimum metric spacing before we stack"+\
                                     "OPTIONAL")
+parser.add_argument("--num-seed-points", action="store", type=int,
+                    default=2000000,
+                    help="Number of random physical points generated to seed "
+                         "the xi->physical inversion (the nearest one is used "
+                         "as the Gauss-Newton starting point for each lattice "
+                         "point). More points give better starting seeds in "
+                         "thin/curved regions of parameter space; the default "
+                         "is adequate for most banks. OPTIONAL")
+parser.add_argument("--reject-distance", action="store", type=float,
+                    default=2.0,
+                    help="Reject a lattice point if its squared xi distance to "
+                         "the physical manifold (found deterministically by the "
+                         "inversion) exceeds this, i.e. the point lies off the "
+                         "physical parameter space. OPTIONAL")
 parser.add_argument("--threed-lattice", action="store_true", default=False,\
                     help="Set this to use a 3D lattice. "+\
                          "OPTIONAL")
@@ -186,7 +200,7 @@ if len(evals) < 5:
 # Create a large set of points and map to xi_i to give a starting point when
 # mapping from xi_i to masses and spins
 rMass1, rMass2, rSpin1z, rSpin2z = \
-      pycbc.tmpltbank.get_random_mass(2000000, massRangeParams)
+      pycbc.tmpltbank.get_random_mass(opts.num_seed_points, massRangeParams)
 rTotmass, rEta = pnutils.mass1_mass2_to_mtotal_eta(rMass1, rMass2)
 
 rXis = pycbc.tmpltbank.get_cov_params(rMass1, rMass2, rSpin1z, rSpin2z,
@@ -239,15 +253,28 @@ for entry in temp_bank:
         dist += (xi3_des - xis[:,2])**2
     xis_close = xis[dist < 0.03]
     masses_close = physMasses[dist < 0.03]
-    # Reject point if it is too far away from *any* of these points
-    if dist.min() > 2.:
-        logging.info("Template %d rejected as too far away" % temp_number)
+    # Reject the point if it lies off the physical manifold. The distance to
+    # the manifold is measured deterministically with the inversion itself (a
+    # bounded Gauss-Newton solve from the seed, with deterministic alternative
+    # seeds), NOT by asking whether the nearest of the finite random sample is
+    # far away. The old sample-based test spuriously rejected thin/curved but
+    # perfectly valid regions (e.g. near the NS/BH mass boundary) that the
+    # random sample happened to undersample, leaving coverage holes; its
+    # outcome also drifted with the sample size and seed. The Gauss-Newton
+    # distance depends on the sample only through the starting seed, which it
+    # then corrects, so it is robust to sampling density.
+    manifold_dist2 = pycbc.tmpltbank.newton_distance_to_physical(
+        xis_des, bestMasses, req_match, massRangeParams, metricParams, opts.f0)
+    if manifold_dist2 > opts.reject_distance:
+        logging.info("Template %d rejected as off the physical manifold "
+                     "(dist^2=%e)" % (temp_number, manifold_dist2))
         # Print info to the rejected points file
         if opts.threed_lattice:
             reject_info.append([temp_number - 1, xi1_des, xi2_des, xi3_des, 0, 0,
-                                0, 0, dist.min()])
+                                0, 0, manifold_dist2])
         else:
-            reject_info.append([temp_number - 1, xi1_des, xi2_des, 0, 0, 0, 0, dist.min()])
+            reject_info.append([temp_number - 1, xi1_des, xi2_des, 0, 0, 0, 0,
+                                manifold_dist2])
         continue
     # This function will use the starting point and iteratively find a
     # physical point has a mismatch < 0.0001 with the desired one

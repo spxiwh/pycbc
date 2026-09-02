@@ -114,8 +114,13 @@ class PartitionedTmpltbank(object):
         self.chi2_min = chi2_min
         self.chi2_max = chi2_max
 
-        # How many adjacent bins should we check?
-        self.bin_range_check = 1
+        # How many adjacent bins should we check? Honour the value passed in
+        # (previously this was hardcoded to 1, silently ignoring the kwarg). A
+        # match at minimal-match MM lies within 1 bin, so 1 suffices for a bank
+        # placed at the same spacing; but where the lattice pitch is coarser
+        # than the bin size, a point's nearest template can be 2-3 bins away, so
+        # a larger value is needed to find it rather than reporting a miss.
+        self.bin_range_check = bin_range_check
         self.bin_loop_order = coord_utils.outspiral_loop(self.bin_range_check)
 
     def get_point_from_bins_and_idx(self, chi1_bin, chi2_bin, idx):

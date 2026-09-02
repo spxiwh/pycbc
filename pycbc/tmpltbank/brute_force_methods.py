@@ -798,6 +798,62 @@ def get_physical_covaried_masses_newton(xis, bestMasses, bestXis, req_match,
     return x[0], x[1], x[2], x[3], nfev, d2, fx
 
 
+def newton_distance_to_physical(xis, bestMasses, req_match, massRangeParams,
+                                metricParams, fUpper):
+    """Squared xi distance from a target position to the physical manifold.
+
+    Deterministically estimates how far the target ``xis`` lies from the
+    nearest physical (m1, m2, s1z, s2z) point, by damped Gauss-Newton from
+    ``bestMasses`` and, if that stalls, from the same deterministic alternative
+    seeds used by :func:`get_physical_covaried_masses_newton` -- but WITHOUT the
+    stochastic fallback, since we only need the distance, not an accurately
+    placed point. The alternative seeds do not depend on any random sample, so
+    the result is robust to how densely a region happens to be sampled: this is
+    a sampling-independent replacement for testing "is the nearest of a random
+    set of physical points far away?", which spuriously rejects thin, valid
+    regions that the random set undersamples.
+
+    Parameters
+    -----------
+    xis : list or array
+        The target position in the xi coordinate system. Only the first
+        ``len(xis)`` dimensions are used.
+    bestMasses : list
+        [totalMass, eta, spin1z, spin2z] of a physical point to start from
+        (e.g. the nearest of a pre-computed sample); only sets the first seed.
+    req_match : float
+        Convergence tolerance; once the squared xi distance is below this the
+        target is deemed on the manifold and the search stops.
+    massRangeParams : massRangeParameters instance
+        Mass and spin range limits defining the physical region.
+    metricParams : metricParameters instance
+        Structure holding the metric eigenvalues, eigenvectors and covariance
+        matrix needed to move between physical and xi coordinates.
+    fUpper : float
+        The upper frequency cutoff used when obtaining the xi coordinates.
+
+    Returns
+    --------
+    dist2 : float
+        The smallest achieved squared xi distance between the target and a
+        physical point. Small (<= req_match) means the target is on the
+        manifold; large means it is off it.
+    """
+    target = numpy.asarray(xis, dtype=float)
+    x0 = _seed_from_bestmasses(bestMasses, massRangeParams)
+    _, _, d2, _, ok = _gn_solve(target, x0, req_match, massRangeParams,
+                                metricParams, fUpper)
+    if not ok:
+        for xalt in _alt_seeds(x0, massRangeParams):
+            _, _, d22, _, ok2 = _gn_solve(target, xalt, req_match,
+                                          massRangeParams, metricParams, fUpper)
+            if d22 < d2:
+                d2 = d22
+            if ok2:
+                break
+    return d2
+
+
 def _correct_fixedJ(target, x, Bpinv, req_match, mrp, metricParams, fUpper,
                     max_it=6):
     """Corrector: pull x back into the req_match ball using a *fixed*

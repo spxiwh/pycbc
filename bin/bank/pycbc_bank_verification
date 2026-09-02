@@ -99,6 +99,15 @@ parser.add_argument("--bin-spacing", action="store", type=float,
                     "mismatch, the width of these bins. Note that metric "
                     "distance is proportional to the square root of the "
                     "mismatch.")
+parser.add_argument("--bin-range-check", action="store", type=int, default=3,
+                    help="When computing matches, compare each test point "
+                    "against templates in its own bin and all bins within +/- "
+                    "this many bins in both chi_1 and chi_2. A value of 1 only "
+                    "suffices if the bank's lattice pitch is no coarser than "
+                    "the bin size; when it is coarser a point's nearest "
+                    "template can be 2-3 bins away, so a too-small value "
+                    "reports a spurious zero match (an artefact, not a hole). "
+                    "DEFAULT = 3.")
 parser.add_argument("--plot-missed-points", type=int, default=0,
                     help="If --print-distances is on, plot the first N points "
                     "with matches below --print-distances-maxmatch in xi1, xi2 "
@@ -188,7 +197,7 @@ logging.info("Initialize the PartitionedTmpltbank class")
 
 partitioned_bank_object = tmpltbank.PartitionedTmpltbank(massRangeParams,
                                metricParams, refFreq, (opts.bin_spacing)**0.5,
-                               bin_range_check=1)
+                               bin_range_check=opts.bin_range_check)
 
 # Map the frequency values to idx if --vary-fupper is used
 if opts.vary_fupper:
