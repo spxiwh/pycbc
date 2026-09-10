@@ -137,10 +137,16 @@ if opts.use_legacy_method:
     logging.info("Using the legacy stochastic (brute-force) method")
     _stack_xi_func = pycbc.tmpltbank.stack_xi_direction_brute
     _inversion_func = pycbc.tmpltbank.get_physical_covaried_masses
+    # the brute method has no multi-branch variant; fall back to itself
+    _stack_xi_multibranch_func = pycbc.tmpltbank.stack_xi_direction_brute
 else:
     logging.info("Using the deterministic Gauss-Newton / continuation method")
     _stack_xi_func = pycbc.tmpltbank.stack_xi_direction_continuation
     _inversion_func = pycbc.tmpltbank.get_physical_covaried_masses_newton
+    # measures depth across disconnected NS/BH spin-cap branches; used only at
+    # nodes where such a branch is geometrically possible (see branch_possible)
+    _stack_xi_multibranch_func = \
+        pycbc.tmpltbank.stack_xi_direction_continuation_multibranch
 
 # Single entry point for the xi -> physical inversion so that *all* call
 # sites (initial placement and stacked templates) use the selected method
@@ -302,60 +308,34 @@ for entry in temp_bank:
     # needed if a 3D lattice is being employed
     tmpTotMass = masses[0] + masses[1]
     tmpEta = masses[0] * masses[1] / (tmpTotMass*tmpTotMass)
+    # A node whose (xi1, xi2) preimage can split into disconnected pieces across
+    # the NS/BH spin-cap boundary needs the multi-branch depth measurement, which
+    # spans both pieces; everywhere else the single-branch continuation is
+    # complete and much cheaper. branch_possible gates on the node's chirp mass,
+    # so this extra cost is only paid where a branch can actually occur. (This
+    # deterministic branch finder replaces the old sample-based re-seeding that
+    # tried to catch such branches via xis_close, which failed whenever the
+    # random sample undersampled the thin second branch.)
+    if pycbc.tmpltbank.branch_possible(masses[0], masses[1], massRangeParams):
+        _depth_func = _stack_xi_multibranch_func
+    else:
+        _depth_func = _stack_xi_func
     if not opts.threed_lattice:
-        # If point is close enough, determine depth of xi3 direction
-        vec3_min, vec3_max=\
-                _stack_xi_func(\
-                  [masses[6][0],masses[6][1]],\
-                  [tmpTotMass,tmpEta,masses[2],masses[3]],\
-                  copy.deepcopy(bestXis), 2, opts.max_mismatch,\
+        # Determine the depth of the xi3 direction (spanning branches if any)
+        vec3_min, vec3_max = _depth_func(
+                  [masses[6][0],masses[6][1]],
+                  [tmpTotMass,tmpEta,masses[2],masses[3]],
+                  copy.deepcopy(bestXis), 2, opts.max_mismatch,
                   massRangeParams, metricParams, opts.f0)
         vec3_depth = vec3_max - vec3_min
-        # Double check that no points appear outside what was calculated above
-        if len(xis_close):
-            if vec3_min > xis_close[:,2].min():
-                logging.warning(
-                    "WARNING: Numerical placement fails, trying again"
-                )
-                temp_idx = xis_close[:,2].argmin()
-                temmpBestMasses = masses_close[temp_idx]
-                temmpBestXis = xis_close[temp_idx]
-                temmpvec3_min, temmpvec3_max =\
-                    _stack_xi_func([xi1_des,xi2_des],\
-                      copy.deepcopy(temmpBestMasses),\
-                      copy.deepcopy(temmpBestXis), 2, opts.max_mismatch, \
-                      massRangeParams, metricParams, opts.f0)
-                temmpvec3_depth = temmpvec3_max - temmpvec3_min
-                if temmpvec3_min < vec3_min:
-                    vec3_min = temmpvec3_min
-                    vec3_depth = vec3_max - vec3_min
-                if temmpvec3_max > vec3_max:
-                    vec3_max = temmpvec3_max
-                    vec3_depth = vec3_max - vec3_min
-            if vec3_max < xis_close[:,2].max():
-                logging.warning(
-                    "WARNING: Numerical placement fails, trying again"
-                )
-                temp_idx = xis_close[:,2].argmax()
-                temmpBestMasses = physMasses[temp_idx]
-                temmpBestXis = xis[temp_idx]
-                temmpvec3_min, temmpvec3_max =\
-                    _stack_xi_func([xi1_des,xi2_des],\
-                      copy.deepcopy(temmpBestMasses),\
-                      copy.deepcopy(temmpBestXis), 2, opts.max_mismatch, \
-                      massRangeParams, metricParams, opts.f0)
-                temmpvec3_depth = temmpvec3_max - temmpvec3_min
-                if temmpvec3_max > vec3_max:
-                    vec3_max = temmpvec3_max
-                    vec3_depth = vec3_max - vec3_min
-                if temmpvec3_min < vec3_min:
-                    vec3_min = temmpvec3_min
-                    vec3_depth = vec3_max - vec3_min
   # Determine depth of xi4 direction (is this needed is xi3 depth is found to
   # be small?)
     if opts.eval_vec4_depth:
+        # xi4 can also carry a spin-cap branch (when the *lighter* body straddles
+        # the NS/BH boundary); use the branch-spanning measurement at gated nodes
+        # so vec4_depth reflects the full extent and the stacking below triggers.
         vec4_min, vec4_max =\
-              _stack_xi_func(\
+              _depth_func(\
                 [masses[6][0],masses[6][1]],\
                 [tmpTotMass,tmpEta,masses[2],masses[3]],\
                 copy.deepcopy(bestXis), 3, opts.max_mismatch,\
@@ -410,7 +390,7 @@ for entry in temp_bank:
             tmpTotMass = masses[0] + masses[1]
             tmpEta = masses[0] * masses[1] / (tmpTotMass*tmpTotMass)
             vec4_minT, vec4_maxT = \
-                  _stack_xi_func(\
+                  _depth_func(\
                     [masses[6][0],masses[6][1],masses[6][2]],\
                     [tmpTotMass,tmpEta,masses[2],masses[3]],\
                     copy.deepcopy(bestXis), 3, opts.max_mismatch,\

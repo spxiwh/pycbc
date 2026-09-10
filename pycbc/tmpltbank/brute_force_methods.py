@@ -1024,3 +1024,177 @@ def stack_xi_direction_continuation(xis, bestMasses, bestXis, direction_num,
                                          metricParams, fUpper)
     return ximin, ximax
 
+
+def _other_mass_const_mc(m_fixed, mchirp, heavier_side):
+    """Companion mass on a constant-chirp-mass curve.
+
+    Solve ``(m_fixed * mo)**3 / (m_fixed + mo) == mchirp**5`` for the companion
+    mass ``mo`` on the requested side of ``m_fixed`` (``heavier_side`` True finds
+    the root with ``mo > m_fixed``, otherwise the root with ``mo < m_fixed``).
+    Returns None if no root exists on that side.
+    """
+    target = mchirp ** 5
+    f = lambda mo: (m_fixed * mo) ** 3 / (m_fixed + mo) - target
+    if heavier_side:
+        lo, hi = m_fixed, m_fixed
+        while f(hi) < 0.0 and hi < 1.0e4:
+            hi *= 2.0
+        if f(hi) < 0.0:
+            return None
+    else:
+        lo, hi = 1.0e-6, m_fixed
+        if f(hi) < 0.0:
+            return None
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        if (f(mid) > 0.0) == (f(hi) > 0.0):
+            hi = mid
+        else:
+            lo = mid
+    return 0.5 * (lo + hi)
+
+
+def branch_possible(mass1, mass2, massRangeParams):
+    """Necessary condition for a spin-cap "branch" at a point's (xi1, xi2).
+
+    Two physical solutions can share the same (xi1, xi2) - which is essentially
+    constant chirp mass - when the constant-chirp-mass curve through the point
+    crosses the NS/BH boundary within the mass box: the spin cap (and hence the
+    achievable xi) changes discontinuously there, so the preimage splits into a
+    piece below the boundary and a piece above it. If that curve cannot put a
+    component on the boundary inside the box, or the NS and BH spin caps are
+    equal, no such branch can occur, and the (more expensive) multi-branch depth
+    measurement can be skipped. This is a conservative test: it returns True
+    whenever a branch is geometrically possible, even if the metric would in the
+    end make the two pieces connected.
+
+    Parameters
+    -----------
+    mass1, mass2 : float
+        Component masses of a physical point at the node.
+    massRangeParams : massRangeParameters instance
+        Holds the mass box, the NS/BH boundary and the spin caps.
+
+    Returns
+    --------
+    bool
+        True if a branch is geometrically possible (so it should be checked
+        for), False if it is impossible.
+    """
+    boundary = massRangeParams.ns_bh_boundary_mass
+    if boundary is None:
+        return False
+    if massRangeParams.maxNSSpinMag == massRangeParams.maxBHSpinMag:
+        return False
+    mchirp = (mass1 * mass2) ** 0.6 / (mass1 + mass2) ** 0.2
+    m_equal = mchirp * 2.0 ** 0.2
+    if m_equal >= boundary:
+        # only the lighter body can cross down through the boundary; its
+        # (heavier) companion stays above it
+        companion = _other_mass_const_mc(boundary, mchirp, heavier_side=True)
+        if companion is None:
+            return False
+        big, small = companion, boundary
+    else:
+        # only the heavier body can cross up through the boundary
+        companion = _other_mass_const_mc(boundary, mchirp, heavier_side=False)
+        if companion is None:
+            return False
+        big, small = boundary, companion
+    tol = 1.0e-6
+    tot = big + small
+    eta = big * small / (tot * tot)
+    if big < massRangeParams.minMass1 - tol or big > massRangeParams.maxMass1 + tol:
+        return False
+    if small < massRangeParams.minMass2 - tol \
+            or small > massRangeParams.maxMass2 + tol:
+        return False
+    if tot < massRangeParams.minTotMass - tol \
+            or tot > massRangeParams.maxTotMass + tol:
+        return False
+    if eta > massRangeParams.maxEta + 1.0e-9:
+        return False
+    min_eta = getattr(massRangeParams, 'minEta', None)
+    if min_eta and eta < min_eta - 1.0e-9:
+        return False
+    return True
+
+
+def stack_xi_direction_continuation_multibranch(xis, bestMasses, bestXis,
+                                                direction_num, req_match,
+                                                massRangeParams, metricParams,
+                                                fUpper, **kwargs):
+    """Depth measurement that spans DISCONNECTED branches of the preimage.
+
+    A drop-in replacement for :func:`stack_xi_direction_continuation`, for use at
+    (xi1, xi2) nodes whose physical preimage can split into two pieces across the
+    NS/BH spin-cap boundary (see :func:`branch_possible`). The single-seed
+    continuation walks only the branch that contains its starting point; here we
+    additionally solve a small, deterministic set of alternative seeds - spanning
+    the mass ratio at fixed total mass, plus a spins-zeroed seed - onto the
+    target, and for every solution that lands on a branch not yet covered by a
+    measured extent we run the continuation from it too. The returned
+    ``[xi_min, xi_max]`` is the union over all branches. The stacking code drops
+    the off-manifold gap between branches through its own mismatch check, so it
+    is safe to stack across the union.
+
+    Same call and return signature as :func:`stack_xi_direction_continuation`.
+    """
+    target = numpy.asarray(xis, dtype=float)
+    k = len(target)
+    starts = []
+    # main seed (accept as-is if already in the ball, else solve for it)
+    x0 = _seed_from_bestmasses(bestMasses, massRangeParams)
+    fx0 = _eval_pts(x0[None, :], metricParams, fUpper)[:, 0]
+    r = fx0[:k] - target
+    if float(r @ r) <= req_match and _is_valid(x0, massRangeParams):
+        starts.append((x0, fx0))
+    else:
+        xs, fxs, _, _, ok = _gn_solve(target, x0, req_match, massRangeParams,
+                                      metricParams, fUpper)
+        if ok:
+            starts.append((xs, fxs))
+            x0 = xs
+    # deterministic alternative seeds: span mass ratio (the degree of freedom
+    # that separates the branches) at the main point's total mass, plus a
+    # spins-zeroed seed that also rescues a failed main seed.
+    tot = float(x0[0] + x0[1])
+    alt = [_project(numpy.array([x0[0], x0[1], 0., 0.]), massRangeParams)]
+    for eta_seed in (0.08, 0.14, 0.20, 0.2499):
+        diff = numpy.sqrt(max(tot * tot * (1. - 4. * eta_seed), 0.))
+        alt.append(_project(numpy.array([(tot + diff) / 2., (tot - diff) / 2.,
+                                         0., 0.]), massRangeParams))
+    for seed in alt:
+        xa, fxa, _, _, ok = _gn_solve(target, seed, req_match, massRangeParams,
+                                      metricParams, fUpper)
+        if ok:
+            starts.append((xa, fxa))
+    if not starts:
+        return 1e10, -1e10
+    # Measure the continuation extent of each genuinely-separate branch. Sort by
+    # xi[direction_num] and run a walk from a start only when it is not already
+    # inside a measured extent. The returned range is the UNION across branches
+    # (the stacking drops the off-manifold gap), so the tolerance here only needs
+    # to be large enough to skip other starts on a branch already walked - a
+    # small numerical slack, NOT the branch separation. Too large a value would
+    # swallow a nearby but disconnected branch (e.g. one separated by << the
+    # covering radius in this direction while separated a lot in another).
+    merge = 0.02
+    starts.sort(key=lambda s: s[1][direction_num])
+    extents = []
+    xi_min, xi_max = 1e10, -1e10
+    for xb, fxb in starts:
+        v = fxb[direction_num]
+        if any(mn - merge <= v <= mx + merge for mn, mx in extents):
+            continue
+        vmin, _, _ = _continuation_extremum(target, xb, fxb, direction_num, -1.,
+                                            req_match, massRangeParams,
+                                            metricParams, fUpper)
+        vmax, _, _ = _continuation_extremum(target, xb, fxb, direction_num, +1.,
+                                            req_match, massRangeParams,
+                                            metricParams, fUpper)
+        extents.append((vmin, vmax))
+        xi_min = min(xi_min, vmin)
+        xi_max = max(xi_max, vmax)
+    return xi_min, xi_max
+

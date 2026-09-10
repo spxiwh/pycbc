@@ -358,37 +358,27 @@ h5file['full_bank/v2s'] = newV2s
 if opts.threed_lattice:
     h5file['full_bank/v3s'] = newV3s
 
-# Now store split banks
-bank_num = 0
-
+# Now store split banks. We always write exactly opts.num_split_jobs groups,
+# indexed 0 .. num_split_jobs-1, because the downstream workflow creates one
+# placement job per split index and reads split_bank_%05d for every index. A
+# fixed ceil(total/n) chunk size can emit fewer groups than requested (the
+# trailing chunks absorb the rounding), which leaves the final job(s) without
+# an input group. numpy.array_split distributes the points as evenly as
+# possible and always yields exactly num_split_jobs sub-banks; when there are
+# fewer points than jobs the surplus sub-banks are empty, and empty sub-banks
+# are handled as no-ops by the placement code.
 logging.info("Printing split banks to HDF file.")
-v1s = []
-v2s = []
-v3s = []
-total_points = len(newV1s)
-points_per_job = int(numpy.ceil(total_points / float(opts.num_split_jobs))) if total_points > 0 and opts.num_split_jobs > 0 else 1
+v1_splits = numpy.array_split(numpy.asarray(newV1s), opts.num_split_jobs)
+v2_splits = numpy.array_split(numpy.asarray(newV2s), opts.num_split_jobs)
+if opts.threed_lattice:
+    v3_splits = numpy.array_split(numpy.asarray(newV3s), opts.num_split_jobs)
 
-for i in range(len(newV1s)):
-    v1s.append(newV1s[i])
-    v2s.append(newV2s[i])
+for bank_num in range(opts.num_split_jobs):
+    grp = 'split_banks/split_bank_%05d' % bank_num
+    h5file['%s/v1s' % grp] = v1_splits[bank_num]
+    h5file['%s/v2s' % grp] = v2_splits[bank_num]
     if opts.threed_lattice:
-        v3s.append(newV3s[i])
-    if not (i+1) % points_per_job:
-        h5file['split_banks/split_bank_%05d/v1s' % bank_num] = v1s
-        h5file['split_banks/split_bank_%05d/v2s' % bank_num] = v2s
-        v1s = []
-        v2s = []
-        if opts.threed_lattice:
-            h5file['split_banks/split_bank_%05d/v3s' % bank_num] = v3s
-            v3s = []
-        bank_num = bank_num + 1
-
-if len(v1s):
-    # There are still templates to dump
-    h5file['split_banks/split_bank_%05d/v1s' % bank_num] = v1s
-    h5file['split_banks/split_bank_%05d/v2s' % bank_num] = v2s
-    if opts.threed_lattice:
-        h5file['split_banks/split_bank_%05d/v3s' % bank_num] = v3s
+        h5file['%s/v3s' % grp] = v3_splits[bank_num]
 
 logging.info('Adding metric information to HDF file.')
 h5file['cov_evecs'] = metricParams.evecsCV[metricParams.fUpper]
